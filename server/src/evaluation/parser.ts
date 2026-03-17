@@ -190,6 +190,42 @@ function runCoverArtCreditCase(): ParserCaseResult {
   };
 }
 
+function runSleeveDesignCreditCase(): ParserCaseResult {
+  const id = 'credit_detect_sleeve_design_by';
+  const prompt = 'songs from albums with sleeve design by Peter Saville';
+  const detected = detectCreditPromptForEval(prompt);
+  const pass = Boolean(detected && detected.role === 'cover_designer' && detected.name === 'Peter Saville');
+  return {
+    id,
+    pass,
+    details: `detected=${JSON.stringify(detected)}`,
+  };
+}
+
+function runArtDirectionCreditCase(): ParserCaseResult {
+  const id = 'credit_detect_art_direction_by';
+  const prompt = 'Albums with art direction by Peter Saville';
+  const detected = detectCreditPromptForEval(prompt);
+  const pass = Boolean(detected && detected.role === 'art_director' && detected.name === 'Peter Saville');
+  return {
+    id,
+    pass,
+    details: `detected=${JSON.stringify(detected)}`,
+  };
+}
+
+function runPhotographyCreditCase(): ParserCaseResult {
+  const id = 'credit_detect_photography_by';
+  const prompt = 'Tracks with photography by Anton Corbijn';
+  const detected = detectCreditPromptForEval(prompt);
+  const pass = Boolean(detected && detected.role === 'photographer' && detected.name === 'Anton Corbijn');
+  return {
+    id,
+    pass,
+    details: `detected=${JSON.stringify(detected)}`,
+  };
+}
+
 function runMembersOfCreditCase(): ParserCaseResult {
   const id = 'credit_detect_produced_by_members_of';
   const prompt = 'Tracks produced by members of The Byrds';
@@ -637,6 +673,9 @@ function run(): void {
     runPlaceExtractionTimelineOfCase(),
     runPlaceExtractionPossessiveStudioCase(),
     runCoverArtCreditCase(),
+    runSleeveDesignCreditCase(),
+    runArtDirectionCreditCase(),
+    runPhotographyCreditCase(),
     runMembersOfCreditCase(),
     runAsAProducerCreditCase(),
     runProductionsOfProducerCreditCase(),

@@ -2847,6 +2847,44 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           : dedupeTracks([...refreshedTruthSeedTracks, ...refreshedCreditEvidenceTracks, ...candidateTracks]);
         verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
       }
+
+      if (!isCoreCreditRole && verifiedTracks.length < MIN_VERIFIED_TRACKS) {
+        const truthRetryResult = await backfillTruthCreditsFromDiscogs({
+          creditName,
+          creditRole,
+          query: creditName,
+          limit: 80,
+          force: true,
+        });
+        truth.credit_sync = {
+          name: creditName,
+          role: creditRole,
+          source: 'discogs',
+          attempted: truthRetryResult.attempted,
+          imported: truthBackfillResult.imported + truthRetryResult.imported,
+          skipped_reason: truthRetryResult.skippedReason || truthBackfillResult.skippedReason,
+        };
+
+        if (truthRetryResult.attempted) {
+          recordRoutingBackfill('discogs', truthRetryResult.imported > 0);
+          console.log(`[truth] credit retry name="${creditName}" role="${creditRole}" imported=${truthRetryResult.imported}${truthRetryResult.skippedReason ? ` reason=${truthRetryResult.skippedReason}` : ''}`);
+        } else if (truthRetryResult.skippedReason) {
+          console.log(`[truth] credit retry skipped reason=${truthRetryResult.skippedReason}`);
+        }
+
+        if (truthRetryResult.imported > 0) {
+          truthCreditCandidates = getTruthCreditCandidates(creditName, creditRole, 220);
+          creditEvidenceTracks = getCreditEvidenceTrackCandidates(constraint, 220);
+          const refreshedCreditEvidenceTracks = bootstrapCreditEvidenceTracks(constraint);
+          const refreshedTruthSeedTracks: Track[] = truthCreditCandidates.map((row) => ({
+            artist: row.artist,
+            song: row.title,
+            reason: `Verified ${creditRole.replace(/_/g, ' ')} truth claim from ${row.source} for ${creditName}`,
+          }));
+          candidateTracks = dedupeTracks([...refreshedTruthSeedTracks, ...refreshedCreditEvidenceTracks]);
+          verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
+        }
+      }
     }
 
     if (verifiedTracks.length < MIN_VERIFIED_TRACKS) {

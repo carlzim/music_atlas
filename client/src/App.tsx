@@ -150,6 +150,7 @@ function humanizeBackfillSkipReason(reason: string): string {
   if (trimmed === 'disabled') return 'Auto-backfill is disabled by server configuration.';
   if (trimmed === 'cooldown_active') return 'Auto-backfill cooldown is active. Try again shortly.';
   if (trimmed === 'unsupported_role') return 'Auto-backfill is not enabled for this credit role yet.';
+  if (trimmed === 'discogs_insufficient_evidence') return 'Discogs truth backfill ran, but not enough verified credit evidence was found yet.';
   if (trimmed.startsWith('error:')) return `Auto-backfill failed: ${trimmed.slice(6)}`;
   return `Auto-backfill skipped: ${trimmed}`;
 }

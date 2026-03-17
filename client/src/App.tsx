@@ -896,12 +896,19 @@ function PlaylistPage() {
 
   useEffect(() => {
     const spotify = searchParams.get('spotify');
+    const spotifyReason = searchParams.get('spotify_reason');
     if (spotify === 'connected') {
       setSpotifyState('success');
       setSpotifyMessage('Spotify connected. You can now save this playlist.');
     } else if (spotify === 'auth_failed') {
       setSpotifyState('error');
-      setSpotifyMessage('Spotify authentication failed. Please try again.');
+      if (spotifyReason === 'missing_state_cookie' || spotifyReason === 'state_mismatch') {
+        setSpotifyMessage('Spotify authentication failed because callback cookies were missing. Open the app via http://localhost:5173 (not 127.0.0.1) and try again.');
+      } else if (spotifyReason?.startsWith('token_exchange_failed')) {
+        setSpotifyMessage('Spotify authentication failed during token exchange. Check SPOTIFY_REDIRECT_URI in your server .env and Spotify app settings.');
+      } else {
+        setSpotifyMessage('Spotify authentication failed. Please try again.');
+      }
     }
   }, [searchParams]);
 

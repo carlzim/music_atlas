@@ -568,6 +568,15 @@ const ALLOWED_CREDIT_ROLES = new Set([
 
 const CORE_CREDIT_TRUTH_ROLES = new Set(['producer', 'engineer', 'arranger']);
 
+function getCreditRoleSearchTerm(role: string): string {
+  const normalized = role.trim().toLowerCase();
+  if (normalized === 'cover_designer') return 'cover design';
+  if (normalized === 'art_director') return 'art direction';
+  if (normalized === 'design_studio') return 'design';
+  if (normalized === 'session_musician') return 'session musician';
+  return normalized.replace(/_/g, ' ');
+}
+
 const ALLOWED_EQUIPMENT_CATEGORIES = new Set([
   'instrument',
   'microphone',
@@ -2794,6 +2803,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   ) {
     const creditName = (constraint.value || '').trim();
     const creditRole = (constraint.creditRole || '').trim().toLowerCase();
+    const creditRoleSearchTerm = getCreditRoleSearchTerm(creditRole);
     const isCoreCreditRole = CORE_CREDIT_TRUTH_ROLES.has(creditRole);
     const initialDiscogsBackfillLimit = isCoreCreditRole ? 100 : 12;
 
@@ -2803,7 +2813,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       const truthBackfillResult = await backfillTruthCreditsFromDiscogs({
         creditName,
         creditRole,
-        query: `${creditName} ${creditRole}`,
+        query: `${creditName} ${creditRoleSearchTerm}`,
         limit: initialDiscogsBackfillLimit,
       });
       truth.credit_sync = {
@@ -2891,6 +2901,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   if (constraint?.kind === 'credit' && verifiedTracks.length > 0) {
     const creditName = (constraint.value || '').trim();
     const creditRole = (constraint.creditRole || '').trim().toLowerCase();
+    const creditRoleSearchTerm = getCreditRoleSearchTerm(creditRole);
     const isCoreCreditRole = CORE_CREDIT_TRUTH_ROLES.has(creditRole);
     let uniqueArtistCount = countUniqueTrackArtists(verifiedTracks);
     const BREADTH_TARGET = 8;
@@ -2925,7 +2936,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           creditPreferredWorksForCuration = canonicalWorks;
         }
         const expansionQueries = new Set<string>();
-        expansionQueries.add(`${creditName} ${creditRole}`);
+        expansionQueries.add(`${creditName} ${creditRoleSearchTerm}`);
         expansionQueries.add(creditName);
         for (const artist of graphHintNeighborArtists) {
           if (expansionQueries.size >= 6) break;

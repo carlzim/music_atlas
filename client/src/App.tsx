@@ -904,6 +904,11 @@ function PlaylistPage() {
       setSpotifyState('error');
       if (spotifyReason === 'missing_state_cookie' || spotifyReason === 'state_mismatch') {
         setSpotifyMessage('Spotify authentication failed because callback cookies were missing. Open the app via http://localhost:5173 (not 127.0.0.1) and try again.');
+      } else if (spotifyReason === 'missing_code') {
+        setSpotifyMessage('Spotify callback did not return an auth code. Check that SPOTIFY_REDIRECT_URI exactly matches your Spotify app settings.');
+      } else if (spotifyReason?.startsWith('spotify_error:')) {
+        const spotifyError = spotifyReason.slice('spotify_error:'.length) || 'unknown_error';
+        setSpotifyMessage(`Spotify authentication failed: ${spotifyError}. Check redirect URI and Spotify app settings.`);
       } else if (spotifyReason?.startsWith('token_exchange_failed')) {
         setSpotifyMessage('Spotify authentication failed during token exchange. Check SPOTIFY_REDIRECT_URI in your server .env and Spotify app settings.');
       } else {
@@ -990,7 +995,7 @@ function PlaylistPage() {
       console.log('Save to Spotify response body:', data);
 
       if (response.status === 401) {
-        window.location.href = `/api/spotify/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
+        window.location.href = `/api/spotify/login?returnTo=${encodeURIComponent(window.location.pathname)}&returnOrigin=${encodeURIComponent(window.location.origin)}`;
         return;
       }
 

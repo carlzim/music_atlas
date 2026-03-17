@@ -40,6 +40,8 @@ db.exec(`
     artist TEXT NOT NULL,
     title TEXT NOT NULL,
     canonical_key TEXT UNIQUE NOT NULL,
+    isrc TEXT,
+    spotify_url TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `);
@@ -213,6 +215,18 @@ if (!hasBandCanonicalColumn) {
 
 if (!hasPersonCanonicalColumn) {
   db.exec('ALTER TABLE artist_membership_evidence ADD COLUMN person_name_canonical TEXT');
+}
+
+const recordingsColumns = db.prepare('PRAGMA table_info(recordings)').all() as Array<{ name: string }>;
+const hasRecordingIsrcColumn = recordingsColumns.some((column) => column.name === 'isrc');
+const hasRecordingSpotifyUrlColumn = recordingsColumns.some((column) => column.name === 'spotify_url');
+
+if (!hasRecordingIsrcColumn) {
+  db.exec('ALTER TABLE recordings ADD COLUMN isrc TEXT');
+}
+
+if (!hasRecordingSpotifyUrlColumn) {
+  db.exec('ALTER TABLE recordings ADD COLUMN spotify_url TEXT');
 }
 
 db.exec(`
@@ -394,6 +408,25 @@ function normalizeRecordingToken(value: string): string {
 
 function buildRecordingCanonicalKey(artist: string, title: string): string {
   return `${normalizeRecordingToken(artist)}::${normalizeRecordingToken(title)}`;
+}
+
+function normalizeIsrc(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function ensureRecordingId(artist: string, title: string): number | null {
+  const artistValue = canonicalizeDisplayName(artist || '');
+  const titleValue = String(title || '').trim();
+  if (!artistValue || !titleValue) return null;
+
+  const canonicalKey = buildRecordingCanonicalKey(artistValue, titleValue);
+  if (!canonicalKey) return null;
+
+  const existing = db.prepare('SELECT id FROM recordings WHERE canonical_key = ? LIMIT 1').get(canonicalKey) as { id: number } | undefined;
+  if (existing?.id) return existing.id;
+
+  const inserted = db.prepare('INSERT INTO recordings (artist, title, canonical_key) VALUES (?, ?, ?)').run(artistValue, titleValue, canonicalKey);
+  return Number(inserted.lastInsertRowid || 0) || null;
 }
 
 function upsertDirectedAtlasEdge(
@@ -3168,6 +3201,48 @@ export function getRecordingCreditEvidenceCount(
   } catch {
     return 0;
   }
+}
+
+export function getRecordingIsrc(artist: string, title: string): string | null {
+  const canonicalKey = buildRecordingCanonicalKey(artist, title);
+  if (!canonicalKey) return null;
+
+  try {
+    const row = db.prepare('SELECT isrc FROM recordings WHERE canonical_key = ? LIMIT 1').get(canonicalKey) as { isrc: string | null } | undefined;
+    const value = typeof row?.isrc === 'string' ? normalizeIsrc(row.isrc) : '';
+    return value.length >= 12 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setRecordingIsrc(artist: string, title: string, isrc: string): void {
+  const normalizedIsrc = normalizeIsrc(isrc || '');
+  if (!normalizedIsrc || normalizedIsrc.length < 12) return;
+  const recordingId = ensureRecordingId(artist, title);
+  if (!recordingId) return;
+
+  db.prepare('UPDATE recordings SET isrc = ? WHERE id = ?').run(normalizedIsrc, recordingId);
+}
+
+export function getRecordingSpotifyUrl(artist: string, title: string): string | null {
+  const canonicalKey = buildRecordingCanonicalKey(artist, title);
+  if (!canonicalKey) return null;
+  try {
+    const row = db.prepare('SELECT spotify_url FROM recordings WHERE canonical_key = ? LIMIT 1').get(canonicalKey) as { spotify_url: string | null } | undefined;
+    const value = typeof row?.spotify_url === 'string' ? row.spotify_url.trim() : '';
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setRecordingSpotifyUrl(artist: string, title: string, spotifyUrl: string): void {
+  const value = String(spotifyUrl || '').trim();
+  if (!value) return;
+  const recordingId = ensureRecordingId(artist, title);
+  if (!recordingId) return;
+  db.prepare('UPDATE recordings SET spotify_url = ? WHERE id = ?').run(value, recordingId);
 }
 
 export function hasRecordingStudioEvidence(

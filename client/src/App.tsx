@@ -136,6 +136,14 @@ interface QualityStatusResponse {
   };
 }
 
+type PromptCreditRole =
+  | 'producer'
+  | 'engineer'
+  | 'arranger'
+  | 'cover_designer'
+  | 'art_director'
+  | 'photographer';
+
 function humanizeBackfillSkipReason(reason: string): string {
   const trimmed = reason.trim();
   if (!trimmed) return 'Auto-backfill was skipped.';
@@ -144,6 +152,28 @@ function humanizeBackfillSkipReason(reason: string): string {
   if (trimmed === 'unsupported_role') return 'Auto-backfill is not enabled for this credit role yet.';
   if (trimmed.startsWith('error:')) return `Auto-backfill failed: ${trimmed.slice(6)}`;
   return `Auto-backfill skipped: ${trimmed}`;
+}
+
+function detectCreditRoleFromPrompt(prompt: string): PromptCreditRole | null {
+  const value = prompt.trim();
+  if (!value) return null;
+  if (/\bsleeve\s+design\s+by\b|\bcover\s+design\s+by\b|\bcover\s+art\s+by\b|\bdesigned\s+by\b|\bcover\s+designer\b/i.test(value)) return 'cover_designer';
+  if (/\bart\s+direction\s+by\b|\bart\s+director\b/i.test(value)) return 'art_director';
+  if (/\bphotography\s+by\b|\bphoto\s+by\b|\bphotographer\b/i.test(value)) return 'photographer';
+  if (/\bengineered\s+by\b|\bengineering\s+by\b|\bmixed\s+by\b|\bmixade\s+av\b|\bengineer\b/i.test(value)) return 'engineer';
+  if (/\barranged\s+by\b|\barranger\b|\barrangerade\s+av\b/i.test(value)) return 'arranger';
+  if (/\bproduced\s+by\b|\bproducer\b|\bproductions?\b|\bwork\s+as\s+(?:a\s+|an\s+)?producer\b|\bproducent\b|\bproducerade\s+av\b/i.test(value)) return 'producer';
+  return null;
+}
+
+function isDiscogsBackfillRole(role: PromptCreditRole): boolean {
+  return role === 'cover_designer' || role === 'art_director' || role === 'photographer';
+}
+
+function humanizeCreditRole(role: PromptCreditRole): string {
+  if (role === 'cover_designer') return 'cover designer';
+  if (role === 'art_director') return 'art director';
+  return role;
 }
 
 const CONNECT_NODE_TYPES: AtlasNodeType[] = ['artist', 'tag', 'scene', 'country', 'city', 'studio', 'venue', 'equipment', 'playlist'];
@@ -603,10 +633,19 @@ function HomePage() {
     const promptText = prompt.trim();
     if (!promptText) return;
 
+    const detectedRole = detectCreditRoleFromPrompt(promptText);
+    if (!detectedRole) {
+      setError('Could not detect credit role from prompt. Try adding "produced by", "engineered by", or "sleeve design by".');
+      return;
+    }
+
+    const useDiscogsTruthBackfill = isDiscogsBackfillRole(detectedRole);
+    const endpoint = useDiscogsTruthBackfill ? '/api/evidence/backfill-credit-truth' : '/api/evidence/backfill-credit';
+
     setEvidenceLoading(true);
     setEvidenceMessage(null);
     try {
-      const response = await fetch('/api/evidence/backfill-credit', {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: promptText, limit: 120 }),
@@ -616,6 +655,7 @@ function HomePage() {
         success?: boolean;
         error?: unknown;
         insertedEvidence?: number;
+        imported?: number;
         role?: string;
         name?: string;
       };
@@ -624,10 +664,15 @@ function HomePage() {
         throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to backfill credit evidence');
       }
 
-      const inserted = typeof payload.insertedEvidence === 'number' ? payload.insertedEvidence : 0;
-      const role = typeof payload.role === 'string' ? payload.role : 'credit';
-      const name = typeof payload.name === 'string' ? payload.name : 'the requested name';
-      setEvidenceMessage(`Backfilled ${inserted} ${role} evidence rows for ${name}. Regenerating playlist...`);
+      if (useDiscogsTruthBackfill) {
+        const imported = typeof payload.imported === 'number' ? payload.imported : 0;
+        setEvidenceMessage(`Backfilled ${imported} truth credit rows via Discogs (${humanizeCreditRole(detectedRole)}). Regenerating playlist...`);
+      } else {
+        const inserted = typeof payload.insertedEvidence === 'number' ? payload.insertedEvidence : 0;
+        const role = typeof payload.role === 'string' ? payload.role : humanizeCreditRole(detectedRole);
+        const name = typeof payload.name === 'string' ? payload.name : 'the requested name';
+        setEvidenceMessage(`Backfilled ${inserted} ${role} evidence rows for ${name}. Regenerating playlist...`);
+      }
 
       await generateFromPrompt(promptText);
     } catch (err) {
@@ -640,7 +685,13 @@ function HomePage() {
   const isCreditEvidenceError = Boolean(
     error && /not enough verified credit evidence|only\s+\d+\s+strongly verified tracks|no verified\s+.+\s+evidence exists yet/i.test(error)
   );
-  const isLikelyCreditPrompt = /\b(produced by|producer\b|productions?\b|work\s+as\s+(?:a\s+|an\s+)?producer|engineered by|engineer\b|arranged by|arranger\b|cover art by|art direction by|photography by|designed by|work\s+of\s+.+\s+as\s+(?:a\s+|an\s+)?(?:producer|engineer|arranger))\b/i.test(prompt);
+  const detectedCreditRole = detectCreditRoleFromPrompt(prompt);
+  const isLikelyCreditPrompt = Boolean(detectedCreditRole);
+  const backfillSourceLabel = detectedCreditRole
+    ? isDiscogsBackfillRole(detectedCreditRole)
+      ? 'Discogs'
+      : 'MusicBrainz'
+    : 'MusicBrainz';
   const creditStatusBadge = verification
     ? verification.used_auto_backfill
       ? `Auto-backfill used (+${verification.backfill_inserted} evidence rows)`
@@ -673,10 +724,10 @@ function HomePage() {
         </button>
         {isLikelyCreditPrompt && (
           <button type="button" onClick={handleBackfillEvidence} disabled={evidenceLoading || loading || !prompt.trim()}>
-            {evidenceLoading ? 'Backfilling evidence...' : 'Backfill credit evidence (MusicBrainz)'}
+            {evidenceLoading ? 'Backfilling evidence...' : `Backfill credit evidence (${backfillSourceLabel})`}
           </button>
         )}
-        {isLikelyCreditPrompt && <p className="credit-status hint">Credit prompt detected. You can backfill evidence from MusicBrainz before generating.</p>}
+        {isLikelyCreditPrompt && <p className="credit-status hint">Credit prompt detected ({humanizeCreditRole(detectedCreditRole!)}). You can backfill evidence from {backfillSourceLabel} before generating.</p>}
         {isLikelyCreditPrompt && creditStatusBadge && <p className={creditStatusClass}>{creditStatusBadge}</p>}
       </form>
 

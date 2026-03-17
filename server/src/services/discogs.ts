@@ -10,7 +10,14 @@ export interface DiscogsReleaseCredit {
 
 const DISCOGS_BASE_URL = 'https://api.discogs.com';
 const MIN_REQUEST_INTERVAL_MS = 1200;
+const DEFAULT_DISCOGS_FETCH_TIMEOUT_MS = 15000;
 let lastRequestStartedAt = 0;
+
+function getDiscogsFetchTimeoutMs(): number {
+  const parsed = Number(process.env.DISCOGS_FETCH_TIMEOUT_MS || DEFAULT_DISCOGS_FETCH_TIMEOUT_MS);
+  if (!Number.isFinite(parsed) || parsed < 2000) return DEFAULT_DISCOGS_FETCH_TIMEOUT_MS;
+  return Math.floor(parsed);
+}
 
 function isRetryableDiscogsStatus(status: number): boolean {
   return status === 429 || status === 503 || status === 502 || status === 504;
@@ -83,7 +90,25 @@ async function rateLimitedDiscogsFetch(url: string): Promise<unknown> {
       headers.Authorization = `Discogs token=${token}`;
     }
 
-    const response = await fetch(requestUrl, { headers });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), getDiscogsFetchTimeoutMs());
+    let response: Response;
+    try {
+      response = await fetch(requestUrl, { headers, signal: controller.signal });
+    } catch (error) {
+      clearTimeout(timeout);
+      const message = error instanceof Error ? error.message : String(error);
+      const aborted = error instanceof DOMException && error.name === 'AbortError';
+      const detail = aborted
+        ? `Discogs request timed out after ${getDiscogsFetchTimeoutMs()}ms`
+        : `Discogs request failed: ${message.slice(0, 240)}`;
+      lastError = detail;
+      if (i === retryDelays.length - 1) {
+        throw new Error(detail);
+      }
+      continue;
+    }
+    clearTimeout(timeout);
 
     if (response.ok) {
       return response.json();

@@ -645,16 +645,21 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   );
 
   const uris: string[] = [];
+  let matchedTrackCount = 0;
+  const skippedTracks: Array<{ artist: string; song: string }> = [];
   let reusedExistingSpotifyUrls = 0;
   let reusedRecordingSpotifyUrls = 0;
   let matchedViaIsrc = 0;
   let discoveredIsrcCount = 0;
   let searchedSpotifyMatches = 0;
   for (const track of trackQueries) {
+    let matchedCurrentTrack = false;
     const existingUri = typeof track.spotify_url === 'string' ? spotifyUrlToUri(track.spotify_url) : null;
     if (existingUri) {
       uris.push(existingUri);
       reusedExistingSpotifyUrls += 1;
+      matchedCurrentTrack = true;
+      matchedTrackCount += 1;
       continue;
     }
 
@@ -663,6 +668,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     if (storedUri) {
       uris.push(storedUri);
       reusedRecordingSpotifyUrls += 1;
+      matchedCurrentTrack = true;
+      matchedTrackCount += 1;
       continue;
     }
 
@@ -689,6 +696,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             uris.push(uri);
             matchedViaIsrc += 1;
             setRecordingSpotifyUrl(track.artist, track.song, spotifyByIsrc.spotify_url);
+            matchedCurrentTrack = true;
+            matchedTrackCount += 1;
             continue;
           }
         }
@@ -705,19 +714,29 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         uris.push(uri);
         searchedSpotifyMatches += 1;
         setRecordingSpotifyUrl(track.artist, track.song, spotifyInfo.spotify_url);
+        matchedCurrentTrack = true;
+        matchedTrackCount += 1;
       }
     } catch (error) {
       console.error('[spotify-save] track match failed:', { artist: track.artist, song: track.song, error });
+    }
+
+    if (!matchedCurrentTrack) {
+      skippedTracks.push({ artist: track.artist, song: track.song });
     }
   }
 
   const dedupedUris = Array.from(new Set(uris));
 
-  const matched = dedupedUris.length;
+  const matched = matchedTrackCount;
   const skipped = trackQueries.length - matched;
+  const addedTracks = dedupedUris.length;
+  const duplicateUriMatches = Math.max(0, matched - addedTracks);
 
   console.log('[spotify-save] matched tracks count:', matched);
+  console.log('[spotify-save] added tracks count:', addedTracks);
   console.log('[spotify-save] skipped tracks count:', skipped);
+  console.log('[spotify-save] duplicate-uri matches:', duplicateUriMatches);
   console.log('[spotify-save] reused existing spotify urls:', reusedExistingSpotifyUrls);
   console.log('[spotify-save] reused recording spotify urls:', reusedRecordingSpotifyUrls);
   console.log('[spotify-save] matched via isrc:', matchedViaIsrc);
@@ -814,9 +833,17 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     res.json({
       success: true,
       spotifyPlaylistUrl: created.external_urls?.spotify || null,
-      addedTracks: matched,
+      addedTracks,
       matched,
       skipped,
+      duplicateUriMatches,
+      skippedTracks: skippedTracks.slice(0, 20),
+      matchSources: {
+        trackSpotifyUrl: reusedExistingSpotifyUrls,
+        recordingSpotifyUrl: reusedRecordingSpotifyUrls,
+        isrc: matchedViaIsrc,
+        search: searchedSpotifyMatches,
+      },
     });
   } catch (error) {
     console.error('[spotify-save] caught error:', error);

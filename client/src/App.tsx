@@ -890,6 +890,19 @@ function PlaylistPage() {
   const [spotifyState, setSpotifyState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [spotifyMessage, setSpotifyMessage] = useState<string | null>(null);
   const [spotifyPlaylistUrl, setSpotifyPlaylistUrl] = useState<string | null>(null);
+  const [spotifyMatchDetails, setSpotifyMatchDetails] = useState<{
+    addedTracks: number;
+    matched: number;
+    skipped: number;
+    duplicateUriMatches: number;
+    skippedTracks: Array<{ artist: string; song: string }>;
+    matchSources?: {
+      trackSpotifyUrl?: number;
+      recordingSpotifyUrl?: number;
+      isrc?: number;
+      search?: number;
+    };
+  } | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -984,6 +997,7 @@ function PlaylistPage() {
     setSpotifyState('saving');
     setSpotifyMessage(null);
     setSpotifyPlaylistUrl(null);
+    setSpotifyMatchDetails(null);
 
     try {
       const response = await fetch(`/api/spotify/save-playlist/${id}`, {
@@ -1004,15 +1018,37 @@ function PlaylistPage() {
       }
 
       setSpotifyState('success');
-      if (typeof data.matched === 'number' && typeof data.skipped === 'number') {
-        setSpotifyMessage(`Saved ${data.matched} tracks to Spotify (${data.skipped} skipped).`);
+      if (typeof data.addedTracks === 'number' && typeof data.matched === 'number' && typeof data.skipped === 'number') {
+        setSpotifyMessage(`Saved ${data.addedTracks} tracks to Spotify (${data.skipped} skipped).`);
       } else {
         setSpotifyMessage(`Saved ${data.addedTracks} tracks to Spotify.`);
       }
       setSpotifyPlaylistUrl(data.spotifyPlaylistUrl || null);
+      setSpotifyMatchDetails({
+        addedTracks: typeof data.addedTracks === 'number' ? data.addedTracks : 0,
+        matched: typeof data.matched === 'number' ? data.matched : 0,
+        skipped: typeof data.skipped === 'number' ? data.skipped : 0,
+        duplicateUriMatches: typeof data.duplicateUriMatches === 'number' ? data.duplicateUriMatches : 0,
+        skippedTracks: Array.isArray(data.skippedTracks)
+          ? data.skippedTracks
+              .filter((item: unknown): item is { artist: string; song: string } => {
+                return Boolean(
+                  item
+                    && typeof item === 'object'
+                    && typeof (item as { artist?: unknown }).artist === 'string'
+                    && typeof (item as { song?: unknown }).song === 'string'
+                );
+              })
+              .slice(0, 20)
+          : [],
+        matchSources: data.matchSources && typeof data.matchSources === 'object'
+          ? data.matchSources as { trackSpotifyUrl?: number; recordingSpotifyUrl?: number; isrc?: number; search?: number }
+          : undefined,
+      });
     } catch (err) {
       setSpotifyState('error');
       setSpotifyMessage(err instanceof Error ? err.message : 'Failed to save playlist to Spotify');
+      setSpotifyMatchDetails(null);
     }
   };
 
@@ -1115,6 +1151,31 @@ function PlaylistPage() {
           {spotifyState === 'saving' ? 'Saving to Spotify...' : 'Save to Spotify'}
         </button>
         {spotifyMessage && <p>{spotifyMessage}</p>}
+        {spotifyMatchDetails && (
+          <>
+            <p>
+              Match sources: existing track URLs {spotifyMatchDetails.matchSources?.trackSpotifyUrl ?? 0},
+              {' '}recording cache {spotifyMatchDetails.matchSources?.recordingSpotifyUrl ?? 0},
+              {' '}ISRC {spotifyMatchDetails.matchSources?.isrc ?? 0},
+              {' '}search {spotifyMatchDetails.matchSources?.search ?? 0}
+            </p>
+            {spotifyMatchDetails.duplicateUriMatches > 0 && (
+              <p>{spotifyMatchDetails.duplicateUriMatches} matched tracks shared duplicate Spotify versions and were collapsed in Spotify export.</p>
+            )}
+            {spotifyMatchDetails.skippedTracks.length > 0 && (
+              <details className="verification-details">
+                <summary>Skipped tracks ({spotifyMatchDetails.skippedTracks.length})</summary>
+                <ul className="playlist-list">
+                  {spotifyMatchDetails.skippedTracks.map((track, idx) => (
+                    <li key={`${track.artist}-${track.song}-${idx}`} className="playlist-item">
+                      {track.song} - {track.artist}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
+        )}
         {spotifyPlaylistUrl && (
           <p>
             <a href={spotifyPlaylistUrl} target="_blank" rel="noopener noreferrer" className="spotify-link">

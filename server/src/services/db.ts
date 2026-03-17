@@ -4045,9 +4045,11 @@ export function savePlaylist(
       insertAtlasEdgeEvidence(fromType, fromName, toType, toName, relationType, strength);
     };
 
-    if (Array.isArray(parsedTracks) && parsedTracks.length > 0 && (equipmentItems.length > 0 || persistedStudiosForEvidence.length > 0 || creditItems.length > 0)) {
+    if (Array.isArray(parsedTracks) && parsedTracks.length > 0) {
         const selectRecordingByKeyStmt = db.prepare('SELECT id FROM recordings WHERE canonical_key = ?');
         const insertRecordingStmt = db.prepare('INSERT INTO recordings (artist, title, canonical_key) VALUES (?, ?, ?)');
+        const updateRecordingSpotifyUrlStmt = db.prepare('UPDATE recordings SET spotify_url = ? WHERE id = ?');
+        const updateRecordingIsrcStmt = db.prepare('UPDATE recordings SET isrc = ? WHERE id = ?');
         const insertEvidenceStmt = db.prepare(
           'INSERT INTO recording_equipment_evidence (recording_id, equipment_name, equipment_category, source_playlist_id) VALUES (?, ?, ?, ?)'
         );
@@ -4112,6 +4114,21 @@ export function savePlaylist(
           } else {
             const insertResult = insertRecordingStmt.run(artistValue, titleValue, canonicalKey);
             recordingId = insertResult.lastInsertRowid as number;
+          }
+
+          const spotifyUrlValue = typeof (track as { spotify_url?: unknown }).spotify_url === 'string'
+            ? (track as { spotify_url: string }).spotify_url.trim()
+            : '';
+          if (spotifyUrlValue) {
+            updateRecordingSpotifyUrlStmt.run(spotifyUrlValue, recordingId);
+          }
+
+          const isrcValueRaw = typeof (track as { isrc?: unknown }).isrc === 'string'
+            ? (track as { isrc: string }).isrc
+            : '';
+          const isrcValue = normalizeIsrc(isrcValueRaw);
+          if (isrcValue.length >= 12) {
+            updateRecordingIsrcStmt.run(isrcValue, recordingId);
           }
 
           for (const equipmentItem of equipmentItems) {

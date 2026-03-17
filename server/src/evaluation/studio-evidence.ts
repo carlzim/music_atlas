@@ -1,0 +1,174 @@
+import Database from 'better-sqlite3';
+import { savePlaylist } from '../services/db.js';
+
+interface StudioEvidenceCaseResult {
+  id: string;
+  pass: boolean;
+  details: string;
+}
+
+function buildRecordingCanonicalKey(artist: string, title: string): string {
+  const normalize = (value: string): string => value.trim().toLowerCase().replace(/\s+/g, ' ');
+  return `${normalize(artist)}::${normalize(title)}`;
+}
+
+function cleanupCaseData(db: Database.Database, playlistId: number, recordingCanonicalKey: string): void {
+  const recordingRow = db
+    .prepare('SELECT id FROM recordings WHERE canonical_key = ?')
+    .get(recordingCanonicalKey) as { id: number } | undefined;
+
+  db.prepare('DELETE FROM recording_equipment_evidence WHERE source_playlist_id = ?').run(playlistId);
+  db.prepare('DELETE FROM recording_credit_evidence WHERE source_playlist_id = ?').run(playlistId);
+  db.prepare('DELETE FROM recording_studio_evidence WHERE source_playlist_id = ?').run(playlistId);
+  db.prepare('DELETE FROM artist_membership_evidence WHERE source_playlist_id = ?').run(playlistId);
+  db.prepare('DELETE FROM playlists WHERE id = ?').run(playlistId);
+
+  if (recordingRow && typeof recordingRow.id === 'number') {
+    const recordingId = recordingRow.id;
+    const remainingEvidence = db
+      .prepare(`
+        SELECT COUNT(*) AS count
+        FROM (
+          SELECT 1 FROM recording_equipment_evidence WHERE recording_id = ?
+          UNION ALL
+          SELECT 1 FROM recording_credit_evidence WHERE recording_id = ?
+          UNION ALL
+          SELECT 1 FROM recording_studio_evidence WHERE recording_id = ?
+        ) evidence
+      `)
+      .get(recordingId, recordingId, recordingId) as { count: number };
+
+    if ((remainingEvidence?.count || 0) === 0) {
+      db.prepare('DELETE FROM recordings WHERE id = ?').run(recordingId);
+    }
+  }
+}
+
+function runLabelPromptNoStudioEvidenceCase(db: Database.Database): StudioEvidenceCaseResult {
+  const id = 'studio_evidence_no_label_to_studio_leak';
+  const artist = 'Eval Guard Artist Label Leak';
+  const song = 'Eval Guard Song Label Leak';
+  const recordingCanonicalKey = buildRecordingCanonicalKey(artist, song);
+
+  const saved = savePlaylist(
+    '[eval] artists on atlantic records label (studio leak guard)',
+    'Eval Label Prompt Guard',
+    'Ensures label prompts do not persist studio evidence.',
+    JSON.stringify([{ artist, song, reason: 'eval guard' }]),
+    JSON.stringify(['eval-guard']),
+    null,
+    null,
+    null,
+    JSON.stringify([]),
+    JSON.stringify(['United States']),
+    JSON.stringify(['New York City']),
+    JSON.stringify(['Atlantic Recording Studios']),
+    JSON.stringify([]),
+    JSON.stringify([]),
+    JSON.stringify([]),
+    JSON.stringify([])
+  );
+
+  try {
+    const row = db
+      .prepare('SELECT COUNT(*) AS count FROM recording_studio_evidence WHERE source_playlist_id = ?')
+      .get(saved.id) as { count: number };
+
+    const pass = (row?.count || 0) === 0;
+    return {
+      id,
+      pass,
+      details: `studio_evidence_rows=${row?.count || 0}`,
+    };
+  } finally {
+    cleanupCaseData(db, saved.id, recordingCanonicalKey);
+  }
+}
+
+function runStudioAliasDedupCase(db: Database.Database): StudioEvidenceCaseResult {
+  const id = 'studio_evidence_alias_dedup_same_recording';
+  const artist = 'Eval Guard Artist Studio Alias';
+  const song = 'Eval Guard Song Studio Alias';
+  const recordingCanonicalKey = buildRecordingCanonicalKey(artist, song);
+
+  const saved = savePlaylist(
+    '[eval] songs recorded at atlantic studios (alias dedup guard)',
+    'Eval Studio Alias Guard',
+    'Ensures studio aliases collapse to one canonical evidence row.',
+    JSON.stringify([{ artist, song, reason: 'eval guard' }]),
+    JSON.stringify(['eval-guard']),
+    null,
+    null,
+    null,
+    JSON.stringify([]),
+    JSON.stringify(['United States']),
+    JSON.stringify(['New York City']),
+    JSON.stringify(['Atlantic Recording Studios', 'Atlantic studios']),
+    JSON.stringify([]),
+    JSON.stringify([]),
+    JSON.stringify([]),
+    JSON.stringify([])
+  );
+
+  try {
+    const recordingRow = db
+      .prepare('SELECT id FROM recordings WHERE canonical_key = ?')
+      .get(recordingCanonicalKey) as { id: number } | undefined;
+
+    if (!recordingRow || typeof recordingRow.id !== 'number') {
+      return {
+        id,
+        pass: false,
+        details: 'recording row missing',
+      };
+    }
+
+    const rows = db
+      .prepare(`
+        SELECT studio_name, COALESCE(studio_name_canonical, lower(trim(studio_name))) AS studio_key
+        FROM recording_studio_evidence
+        WHERE source_playlist_id = ? AND recording_id = ?
+      `)
+      .all(saved.id, recordingRow.id) as Array<{ studio_name: string | null; studio_key: string | null }>;
+
+    const canonicalKeys = new Set(
+      rows
+        .map((row) => (typeof row.studio_key === 'string' ? row.studio_key.trim() : ''))
+        .filter((value) => value.length > 0)
+    );
+
+    const pass = rows.length === 1 && canonicalKeys.size === 1;
+    return {
+      id,
+      pass,
+      details: `rows=${rows.length} canonical_keys=${canonicalKeys.size}`,
+    };
+  } finally {
+    cleanupCaseData(db, saved.id, recordingCanonicalKey);
+  }
+}
+
+function run(): void {
+  const strict = process.argv.includes('--strict');
+  const db = new Database('playlists.db');
+
+  const results: StudioEvidenceCaseResult[] = [
+    runLabelPromptNoStudioEvidenceCase(db),
+    runStudioAliasDedupCase(db),
+  ];
+
+  const passed = results.filter((result) => result.pass).length;
+  const failed = results.length - passed;
+
+  console.log('[eval:studio-evidence] Studio evidence guard harness');
+  console.log(`[eval:studio-evidence] Cases: ${results.length}, Passed: ${passed}, Failed: ${failed}`);
+  for (const result of results) {
+    console.log(`[eval:studio-evidence] ${result.pass ? 'PASS' : 'FAIL'} ${result.id} -> ${result.details}`);
+  }
+
+  if (strict && failed > 0) {
+    process.exitCode = 1;
+  }
+}
+
+run();

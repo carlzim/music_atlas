@@ -1,0 +1,141 @@
+name: Eval Quality Nightly
+
+on:
+  schedule:
+    - cron: "15 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: eval-quality-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  eval-nightly:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Restore previous enrich artifact cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            server/eval-artifacts/last-enrich-evidence.json
+            server/eval-artifacts/last-profile-status.json
+          key: nightly-enrich-evidence-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            nightly-enrich-evidence-${{ github.ref_name }}-
+            nightly-enrich-evidence-
+
+      - name: Load strict quality profile
+        run: npm run eval:profile:export >> "$GITHUB_ENV"
+
+      - name: Run strict quality pipeline
+        env:
+          ENFORCE_PROFILE_DRIFT_ON_MAIN: "1"
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+        run: npm run eval:ci:strict
+
+      - name: Add run summary
+        if: always()
+        run: |
+          echo "## Nightly Quality" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "eval-artifacts/pr-summary-brief.md" ]; then
+            cat "eval-artifacts/pr-summary-brief.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No nightly summary generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Update nightly quality issue
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- nightly-eval-quality -->';
+            const title = 'Nightly Quality Monitor';
+            const briefPath = 'server/eval-artifacts/pr-summary-brief.md';
+            const brief = fs.existsSync(briefPath)
+              ? fs.readFileSync(briefPath, 'utf8').trim()
+              : 'No nightly quality summary generated.';
+
+            const body = `${marker}\n## Nightly Eval Quality\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n${brief}`;
+            const { owner, repo } = context.repo;
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const existing = issues.find((issue) =>
+              !issue.pull_request
+              && issue.title === title
+              && typeof issue.body === 'string'
+              && issue.body.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                title,
+                body,
+              });
+              core.info(`Updated nightly quality issue #${existing.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: ['quality'],
+              });
+              core.info(`Created nightly quality issue #${created.data.number}`);
+            }
+
+      - name: Upload eval artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-eval-artifacts
+          path: |
+            server/eval-artifacts/*.json
+            server/eval-artifacts/*.md
+          if-no-files-found: warn
+
+      - name: Persist baseline artifacts
+        if: always()
+        run: npm run eval:baseline:persist
+
+      - name: Save enrich artifact cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            server/eval-artifacts/last-enrich-evidence.json
+            server/eval-artifacts/last-profile-status.json
+          key: nightly-enrich-evidence-${{ github.ref_name }}-${{ github.run_id }}

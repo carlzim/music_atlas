@@ -1,0 +1,403 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background-color: #f5f5f5;
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+
+.prompt-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+textarea {
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 1rem;
+  resize: vertical;
+  font-family: inherit;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: #6200ea;
+}
+
+button {
+  padding: 0.75rem 1.5rem;
+  background-color: #6200ea;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+button:hover:not(:disabled) {
+  background-color: #3700b3;
+}
+
+button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.result {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #eee;
+}
+
+.quality-panel {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #dfe8ff;
+  background: #f5f8ff;
+  border-radius: 10px;
+}
+
+.quality-panel h3 {
+  font-size: 0.95rem;
+  color: #27408b;
+  margin-bottom: 0.35rem;
+}
+
+.quality-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.quality-panel-header h3 {
+  margin-bottom: 0;
+}
+
+.quality-panel-header button {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+  border-radius: 6px;
+}
+
+.quality-panel p {
+  font-size: 0.85rem;
+  color: #334;
+  margin: 0.2rem 0;
+}
+
+.placeholder-text {
+  text-align: center;
+  color: #888;
+}
+
+.playlist-placeholder pre {
+  background: #f9f9f9;
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.error {
+  color: #d32f2f;
+  background: #ffebee;
+  padding: 0.75rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.credit-status {
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  border: 1px solid #d6d6d6;
+  background: #f8f8f8;
+  color: #444;
+}
+
+.credit-status.hint {
+  background: #f2f4ff;
+  border-color: #cfd7ff;
+  color: #3949ab;
+}
+
+.credit-status.auto {
+  background: #e8f5e9;
+  border-color: #b7dfba;
+  color: #1b5e20;
+}
+
+.credit-status.ready {
+  background: #e7f1ff;
+  border-color: #bed7ff;
+  color: #0d47a1;
+}
+
+.credit-status.warning {
+  background: #fff3e0;
+  border-color: #ffd8a8;
+  color: #8d4e00;
+}
+
+.verification-details {
+  margin: 0.5rem 0 1rem;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 0.5rem 0.75rem;
+}
+
+.verification-details summary {
+  cursor: pointer;
+  color: #555;
+  font-weight: 600;
+}
+
+.verification-details pre {
+  margin-top: 0.5rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.82rem;
+  color: #444;
+}
+
+.playlist h2 {
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.cached-badge {
+  display: inline-block;
+  background: #e8f5e9;
+  color: #2e7d32;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.playlist .description {
+  color: #666;
+  margin-bottom: 1.5rem;
+  font-style: italic;
+}
+
+.tracks {
+  list-style: none;
+}
+
+.track {
+  padding: 1rem;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  gap: 1rem;
+}
+
+.track:last-child {
+  border-bottom: none;
+}
+
+.track .album-art {
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.track .track-info {
+  flex: 1;
+}
+
+.track-title {
+  font-weight: 600;
+  color: #333;
+}
+
+.track-artist {
+  color: #666;
+  margin-left: 0.5rem;
+}
+
+.track-reason {
+  color: #888;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+.spotify-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  color: #1DB954;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.spotify-link:hover {
+  text-decoration: underline;
+}
+
+.recent-playlists {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #eee;
+}
+
+.related-playlists {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #eee;
+}
+
+.recent-playlists h3 {
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.related-playlists h3 {
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.playlist-list {
+  list-style: none;
+}
+
+.playlist-item {
+  padding: 0.75rem;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  margin-bottom: 0.5rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.playlist-item:hover {
+  background-color: #f5f5f5;
+}
+
+.playlist-item .playlist-title {
+  display: block;
+  font-weight: 600;
+  color: #333;
+}
+
+.playlist-item .playlist-prompt {
+  display: block;
+  font-size: 0.85rem;
+  color: #666;
+  margin-top: 0.25rem;
+}
+
+.playlist-item .playlist-date {
+  display: block;
+  font-size: 0.75rem;
+  color: #999;
+  margin-top: 0.25rem;
+}
+
+.playlist-item .playlist-link {
+  text-decoration: none;
+  display: block;
+  color: inherit;
+}
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: #6200ea;
+  text-decoration: none;
+}
+
+.back-link:hover {
+  text-decoration: underline;
+}
+
+.place-link {
+  color: #6200ea;
+  text-decoration: none;
+}
+
+.place-link:hover {
+  text-decoration: underline;
+}
+
+.scene-link {
+  color: #6200ea;
+  text-decoration: none;
+}
+
+.scene-link:hover {
+  text-decoration: underline;
+}
+
+.artist-link {
+  color: #6200ea;
+  text-decoration: none;
+}
+
+.artist-link:hover {
+  text-decoration: underline;
+}
+
+.playlist-page .meta {
+  margin: 1rem 0;
+  padding: 1rem;
+  background: #f9f9f9;
+  border-radius: 8px;
+}
+
+.playlist-page .meta p {
+  margin: 0.25rem 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.tags {
+  margin: 0.5rem 0 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.tag {
+  display: inline-block;
+  background: #f0f0f0;
+  color: #666;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.tag-link {
+  text-decoration: none;
+  color: #666;
+}
+
+.tag-link:hover {
+  background: #e8e8e8;
+}

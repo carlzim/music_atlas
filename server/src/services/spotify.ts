@@ -159,12 +159,29 @@ function validateCandidateMatch(
   const requestedTitle = normalizeTitleKey(song);
   const cleanedRequestedTitle = normalizeTitleKey(cleanSongTitle(song));
   const candidateTitle = normalizeTitleKey(candidate.title);
+  const hasAllowedVersionSuffix = (baseTitle: string): boolean => {
+    if (!baseTitle || candidateTitle.length <= baseTitle.length) return false;
+    if (!candidateTitle.startsWith(`${baseTitle} `)) return false;
+    const suffix = candidateTitle.slice(baseTitle.length).trim();
+    if (!suffix) return false;
+    const compactSuffix = suffix.replace(/^[-\s]+/, '').trim();
+    const tokenCount = compactSuffix.split(' ').filter(Boolean).length;
+    if (tokenCount === 0 || tokenCount > 8) return false;
+    return /\b(remaster(?:ed)?|mix|edit|version|mono|stereo|acoustic|instrumental|karaoke|live|session|demo|deluxe|expanded|anniversary|explicit|clean|single|take)\b/.test(compactSuffix);
+  };
+
   const hasRequestedPrefix = allowTitleSuffix
     && (
       (requestedTitle.length > 0 && (candidateTitle === requestedTitle || candidateTitle.startsWith(`${requestedTitle} `)))
       || (cleanedRequestedTitle.length > 0 && (candidateTitle === cleanedRequestedTitle || candidateTitle.startsWith(`${cleanedRequestedTitle} `)))
     );
-  const titleOk = candidateTitle === requestedTitle || candidateTitle === cleanedRequestedTitle || hasRequestedPrefix;
+  const hasVersionSuffixMatch =
+    (requestedTitle.length > 0 && hasAllowedVersionSuffix(requestedTitle))
+    || (cleanedRequestedTitle.length > 0 && hasAllowedVersionSuffix(cleanedRequestedTitle));
+  const titleOk = candidateTitle === requestedTitle
+    || candidateTitle === cleanedRequestedTitle
+    || hasRequestedPrefix
+    || hasVersionSuffixMatch;
   if (!titleOk) {
     return { ok: false, reason: 'title mismatch' };
   }

@@ -457,10 +457,27 @@ app.get('/api/spotify/callback', async (req, res) => {
   const stateFromQuery = String(req.query.state || '');
   const code = String(req.query.code || '');
   const returnTo = cookies.spotify_return_to || '/';
+  const redirectWithSpotifyStatus = (status: 'connected' | 'auth_failed', reason?: string) => {
+    const params = new URLSearchParams({ spotify: status });
+    if (reason && reason.trim().length > 0) params.set('spotify_reason', reason.trim());
+    res.redirect(`${config.frontendUrl}${returnTo}?${params.toString()}`);
+  };
 
-  if (!code || !stateFromCookie || stateFromCookie !== stateFromQuery) {
+  if (!code) {
     res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
-    res.redirect(`${config.frontendUrl}${returnTo}?spotify=auth_failed`);
+    redirectWithSpotifyStatus('auth_failed', 'missing_code');
+    return;
+  }
+
+  if (!stateFromCookie) {
+    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
+    redirectWithSpotifyStatus('auth_failed', 'missing_state_cookie');
+    return;
+  }
+
+  if (stateFromCookie !== stateFromQuery) {
+    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
+    redirectWithSpotifyStatus('auth_failed', 'state_mismatch');
     return;
   }
 
@@ -483,7 +500,8 @@ app.get('/api/spotify/callback', async (req, res) => {
     console.log('[spotify-auth] token source: authorization_code flow');
     if (!tokenResponse.ok || !tokenData.access_token || !tokenData.expires_in) {
       res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
-      res.redirect(`${config.frontendUrl}${returnTo}?spotify=auth_failed`);
+      const reason = tokenData.error ? `token_exchange_failed:${tokenData.error}` : 'token_exchange_failed';
+      redirectWithSpotifyStatus('auth_failed', reason);
       return;
     }
 
@@ -496,10 +514,10 @@ app.get('/api/spotify/callback', async (req, res) => {
       clearCookie('spotify_return_to'),
     ]);
 
-    res.redirect(`${config.frontendUrl}${returnTo}?spotify=connected`);
+    redirectWithSpotifyStatus('connected');
   } catch {
     res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
-    res.redirect(`${config.frontendUrl}${returnTo}?spotify=auth_failed`);
+    redirectWithSpotifyStatus('auth_failed', 'callback_exception');
   }
 });
 

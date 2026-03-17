@@ -5,9 +5,10 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
-import { searchTrack } from './services/spotify.js';
-import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions } from './services/db.js';
+import { searchTrack, searchTrackByIsrc } from './services/spotify.js';
+import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingIsrc, setRecordingSpotifyUrl } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
+import { resolveMusicBrainzRecordingIsrc } from './services/musicbrainz.js';
 import { backfillTruthCreditsFromDiscogs } from './services/truth-credit-layer.js';
 
 const app = express();
@@ -73,6 +74,66 @@ interface CreditEvidenceBackfillRequest {
   prompt?: string;
   query?: string;
   limit?: number;
+}
+
+function parseOrigin(value: string | undefined): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return '';
+  }
+}
+
+function canUseFrontendOrigin(candidateOrigin: string, configuredFrontendUrl: string): boolean {
+  if (!candidateOrigin) return false;
+  const configuredOrigin = parseOrigin(configuredFrontendUrl);
+  if (configuredOrigin && candidateOrigin === configuredOrigin) return true;
+
+  try {
+    const url = new URL(candidateOrigin);
+    return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
+  } catch {
+    return false;
+  }
+}
+
+function buildSpotifyState(stateNonce: string, returnTo: string, returnOrigin: string): string {
+  const payload = Buffer.from(JSON.stringify({
+    n: stateNonce,
+    r: returnTo,
+    o: returnOrigin,
+  })).toString('base64url');
+  return `${stateNonce}.${payload}`;
+}
+
+function parseSpotifyState(stateRaw: string): { nonce: string; returnTo: string; returnOrigin: string } | null {
+  const value = String(stateRaw || '').trim();
+  if (!value) return null;
+  const dot = value.indexOf('.');
+  if (dot <= 0) return null;
+  const nonce = value.slice(0, dot).trim();
+  const payload = value.slice(dot + 1).trim();
+  if (!nonce || !payload) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8')) as {
+      n?: unknown;
+      r?: unknown;
+      o?: unknown;
+    };
+    const payloadNonce = typeof decoded.n === 'string' ? decoded.n.trim() : '';
+    const returnTo = typeof decoded.r === 'string' ? decoded.r.trim() : '';
+    const returnOrigin = typeof decoded.o === 'string' ? decoded.o.trim() : '';
+    if (!payloadNonce || payloadNonce !== nonce) return null;
+    return {
+      nonce,
+      returnTo: returnTo.startsWith('/') ? returnTo : '/',
+      returnOrigin,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function readArtifactJson<T>(fileName: string): T | null {
@@ -425,21 +486,29 @@ app.get('/api/spotify/login', (req, res) => {
   const state = randomUUID();
   const returnToRaw = String(req.query.returnTo || '/');
   const returnTo = returnToRaw.startsWith('/') ? returnToRaw : '/';
+  const returnOriginQuery = parseOrigin(typeof req.query.returnOrigin === 'string' ? req.query.returnOrigin : '');
+  const requestOrigin = parseOrigin(typeof req.headers.origin === 'string' ? req.headers.origin : '');
+  const refererOrigin = parseOrigin(typeof req.headers.referer === 'string' ? req.headers.referer : '');
+  const returnOrigin = [returnOriginQuery, requestOrigin, refererOrigin]
+    .find((origin) => canUseFrontendOrigin(origin || '', config.frontendUrl)) || parseOrigin(config.frontendUrl);
 
   const spotifyScope = 'playlist-modify-private playlist-modify-public';
   console.log('[spotify-auth] login scopes:', spotifyScope);
+
+  const oauthState = buildSpotifyState(state, returnTo, returnOrigin);
 
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: config.clientId,
     scope: spotifyScope,
     redirect_uri: config.redirectUri,
-    state,
+    state: oauthState,
   });
 
   res.setHeader('Set-Cookie', [
-    buildCookie('spotify_oauth_state', state, 600),
+    buildCookie('spotify_oauth_state', oauthState, 600),
     buildCookie('spotify_return_to', returnTo, 600),
+    buildCookie('spotify_return_origin', returnOrigin, 600),
   ]);
 
   res.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);
@@ -455,29 +524,35 @@ app.get('/api/spotify/callback', async (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
   const stateFromCookie = cookies.spotify_oauth_state;
   const stateFromQuery = String(req.query.state || '');
+  const stateFromQueryPayload = parseSpotifyState(stateFromQuery);
   const code = String(req.query.code || '');
-  const returnTo = cookies.spotify_return_to || '/';
+  const returnTo = cookies.spotify_return_to || stateFromQueryPayload?.returnTo || '/';
+  const cookieOrigin = parseOrigin(cookies.spotify_return_origin || stateFromQueryPayload?.returnOrigin || '');
+  const configuredFrontendOrigin = parseOrigin(config.frontendUrl);
+  const frontendOrigin = configuredFrontendOrigin || (canUseFrontendOrigin(cookieOrigin, config.frontendUrl) ? cookieOrigin : '');
   const redirectWithSpotifyStatus = (status: 'connected' | 'auth_failed', reason?: string) => {
     const params = new URLSearchParams({ spotify: status });
     if (reason && reason.trim().length > 0) params.set('spotify_reason', reason.trim());
-    res.redirect(`${config.frontendUrl}${returnTo}?${params.toString()}`);
+    res.redirect(`${frontendOrigin}${returnTo}?${params.toString()}`);
   };
 
+  const spotifyAuthError = typeof req.query.error === 'string' ? req.query.error.trim() : '';
+
   if (!code) {
-    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
-    redirectWithSpotifyStatus('auth_failed', 'missing_code');
+    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to'), clearCookie('spotify_return_origin')]);
+    redirectWithSpotifyStatus('auth_failed', spotifyAuthError ? `spotify_error:${spotifyAuthError}` : 'missing_code');
     return;
   }
 
-  if (!stateFromCookie) {
-    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
-    redirectWithSpotifyStatus('auth_failed', 'missing_state_cookie');
-    return;
-  }
-
-  if (stateFromCookie !== stateFromQuery) {
-    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
+  if (stateFromCookie && stateFromCookie !== stateFromQuery) {
+    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to'), clearCookie('spotify_return_origin')]);
     redirectWithSpotifyStatus('auth_failed', 'state_mismatch');
+    return;
+  }
+
+  if (!stateFromCookie && !stateFromQueryPayload) {
+    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to'), clearCookie('spotify_return_origin')]);
+    redirectWithSpotifyStatus('auth_failed', 'missing_state_cookie');
     return;
   }
 
@@ -499,7 +574,7 @@ app.get('/api/spotify/callback', async (req, res) => {
     console.log('[spotify-auth] callback token scope:', tokenData.scope || '(none)');
     console.log('[spotify-auth] token source: authorization_code flow');
     if (!tokenResponse.ok || !tokenData.access_token || !tokenData.expires_in) {
-      res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
+      res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to'), clearCookie('spotify_return_origin')]);
       const reason = tokenData.error ? `token_exchange_failed:${tokenData.error}` : 'token_exchange_failed';
       redirectWithSpotifyStatus('auth_failed', reason);
       return;
@@ -512,11 +587,12 @@ app.get('/api/spotify/callback', async (req, res) => {
       buildCookie('spotify_token_scope', tokenData.scope || '', tokenData.expires_in),
       clearCookie('spotify_oauth_state'),
       clearCookie('spotify_return_to'),
+      clearCookie('spotify_return_origin'),
     ]);
 
     redirectWithSpotifyStatus('connected');
   } catch {
-    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to')]);
+    res.setHeader('Set-Cookie', [clearCookie('spotify_oauth_state'), clearCookie('spotify_return_to'), clearCookie('spotify_return_origin')]);
     redirectWithSpotifyStatus('auth_failed', 'callback_exception');
   }
 });
@@ -556,7 +632,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     return;
   }
 
-  let tracks: Array<{ song?: string; artist?: string }> = [];
+  let tracks: Array<{ song?: string; artist?: string; spotify_url?: string }> = [];
   try {
     const parsed = JSON.parse(playlist.tracks);
     if (Array.isArray(parsed)) tracks = parsed;
@@ -565,16 +641,71 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   }
 
   const trackQueries = tracks.filter(
-    (track): track is { song: string; artist: string } => typeof track.song === 'string' && track.song.trim().length > 0 && typeof track.artist === 'string' && track.artist.trim().length > 0
+    (track): track is { song: string; artist: string; spotify_url?: string } => typeof track.song === 'string' && track.song.trim().length > 0 && typeof track.artist === 'string' && track.artist.trim().length > 0
   );
 
   const uris: string[] = [];
+  let reusedExistingSpotifyUrls = 0;
+  let reusedRecordingSpotifyUrls = 0;
+  let matchedViaIsrc = 0;
+  let discoveredIsrcCount = 0;
+  let searchedSpotifyMatches = 0;
   for (const track of trackQueries) {
+    const existingUri = typeof track.spotify_url === 'string' ? spotifyUrlToUri(track.spotify_url) : null;
+    if (existingUri) {
+      uris.push(existingUri);
+      reusedExistingSpotifyUrls += 1;
+      continue;
+    }
+
+    const storedSpotifyUrl = getRecordingSpotifyUrl(track.artist, track.song);
+    const storedUri = storedSpotifyUrl ? spotifyUrlToUri(storedSpotifyUrl) : null;
+    if (storedUri) {
+      uris.push(storedUri);
+      reusedRecordingSpotifyUrls += 1;
+      continue;
+    }
+
+    let recordingIsrc = getRecordingIsrc(track.artist, track.song);
+    if (!recordingIsrc) {
+      try {
+        const resolvedIsrc = await resolveMusicBrainzRecordingIsrc(track.artist, track.song);
+        if (resolvedIsrc) {
+          recordingIsrc = resolvedIsrc;
+          setRecordingIsrc(track.artist, track.song, resolvedIsrc);
+          discoveredIsrcCount += 1;
+        }
+      } catch (error) {
+        console.log('[spotify-save] mb isrc lookup skipped:', { artist: track.artist, song: track.song, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
+    if (recordingIsrc) {
+      try {
+        const spotifyByIsrc = await searchTrackByIsrc(recordingIsrc);
+        if (spotifyByIsrc.spotify_url) {
+          const uri = spotifyUrlToUri(spotifyByIsrc.spotify_url);
+          if (uri) {
+            uris.push(uri);
+            matchedViaIsrc += 1;
+            setRecordingSpotifyUrl(track.artist, track.song, spotifyByIsrc.spotify_url);
+            continue;
+          }
+        }
+      } catch (error) {
+        console.log('[spotify-save] isrc spotify lookup skipped:', { artist: track.artist, song: track.song, isrc: recordingIsrc, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+
     try {
       const spotifyInfo = await searchTrack(track.artist, track.song, playlist.prompt);
       if (!spotifyInfo.spotify_url) continue;
       const uri = spotifyUrlToUri(spotifyInfo.spotify_url);
-      if (uri) uris.push(uri);
+      if (uri) {
+        uris.push(uri);
+        searchedSpotifyMatches += 1;
+        setRecordingSpotifyUrl(track.artist, track.song, spotifyInfo.spotify_url);
+      }
     } catch (error) {
       console.error('[spotify-save] track match failed:', { artist: track.artist, song: track.song, error });
     }
@@ -587,6 +718,11 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
   console.log('[spotify-save] matched tracks count:', matched);
   console.log('[spotify-save] skipped tracks count:', skipped);
+  console.log('[spotify-save] reused existing spotify urls:', reusedExistingSpotifyUrls);
+  console.log('[spotify-save] reused recording spotify urls:', reusedRecordingSpotifyUrls);
+  console.log('[spotify-save] matched via isrc:', matchedViaIsrc);
+  console.log('[spotify-save] discovered isrc count:', discoveredIsrcCount);
+  console.log('[spotify-save] searched spotify matches:', searchedSpotifyMatches);
   console.log('[spotify-save] first track uris:', dedupedUris.slice(0, 5));
 
   if (matched === 0) {

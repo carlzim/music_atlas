@@ -330,6 +330,92 @@ export async function fetchMusicBrainzCreditTracks(
   return output;
 }
 
+function normalizeRecordingMatchValue(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeIsrc(value: string): string {
+  return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+export async function resolveMusicBrainzRecordingIsrc(artist: string, title: string): Promise<string | null> {
+  const artistValue = artist.trim();
+  const titleValue = title.trim();
+  if (!artistValue || !titleValue) return null;
+
+  const query = `recording:"${titleValue}" AND artist:"${artistValue}"`;
+  const searchUrl = `${MUSICBRAINZ_BASE_URL}/recording/?query=${encodeURIComponent(query)}&fmt=json&limit=5`;
+  const searchRaw = await rateLimitedFetchJson(searchUrl) as { recordings?: unknown[] };
+  const recordings = Array.isArray(searchRaw.recordings) ? searchRaw.recordings : [];
+  if (recordings.length === 0) return null;
+
+  const targetArtist = normalizeRecordingMatchValue(artistValue);
+  const targetTitle = normalizeRecordingMatchValue(titleValue);
+
+  const ranked = recordings
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const row = item as {
+        id?: unknown;
+        title?: unknown;
+        score?: unknown;
+        ['artist-credit']?: unknown[];
+      };
+      const id = typeof row.id === 'string' ? row.id.trim() : '';
+      const name = typeof row.title === 'string' ? row.title.trim() : '';
+      const score = Number(row.score || 0);
+      if (!id || !name) return null;
+      const titleNorm = normalizeRecordingMatchValue(name);
+      const artists = Array.isArray(row['artist-credit'])
+        ? row['artist-credit']
+            .map((credit) => {
+              if (!credit || typeof credit !== 'object') return '';
+              const entry = credit as { name?: unknown; artist?: { name?: unknown } };
+              if (typeof entry.name === 'string') return entry.name;
+              if (typeof entry.artist?.name === 'string') return entry.artist.name;
+              return '';
+            })
+            .filter((value) => value.length > 0)
+        : [];
+      const artistNorms = artists.map((value) => normalizeRecordingMatchValue(value));
+      const artistMatch = artistNorms.some((value) => value === targetArtist || value.includes(targetArtist) || targetArtist.includes(value));
+      const titleMatch = titleNorm === targetTitle || titleNorm.includes(targetTitle) || targetTitle.includes(titleNorm);
+      return { id, score, artistMatch, titleMatch };
+    })
+    .filter((item): item is { id: string; score: number; artistMatch: boolean; titleMatch: boolean } => Boolean(item))
+    .sort((a, b) => {
+      const aRank = (a.artistMatch ? 2 : 0) + (a.titleMatch ? 2 : 0);
+      const bRank = (b.artistMatch ? 2 : 0) + (b.titleMatch ? 2 : 0);
+      if (bRank !== aRank) return bRank - aRank;
+      return b.score - a.score;
+    });
+
+  for (const item of ranked.slice(0, 3)) {
+    try {
+      const recordingUrl = `${MUSICBRAINZ_BASE_URL}/recording/${encodeURIComponent(item.id)}?inc=isrcs&fmt=json`;
+      const raw = await rateLimitedFetchJson(recordingUrl) as { isrcs?: unknown[] };
+      const isrcs = Array.isArray(raw.isrcs)
+        ? raw.isrcs
+            .filter((value): value is string => typeof value === 'string')
+            .map((value) => normalizeIsrc(value))
+            .filter((value) => value.length >= 12)
+        : [];
+      if (isrcs.length > 0) return isrcs[0];
+    } catch {
+      // best-effort
+    }
+  }
+
+  return null;
+}
+
 export async function fetchMusicBrainzGroupMembers(
   groupMbid: string,
   limit = 80

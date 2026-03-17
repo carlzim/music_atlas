@@ -28,11 +28,38 @@ function isTransientPlaylistError(error: unknown): boolean {
     || message.includes('temporarily unavailable')
     || message.includes('overload')
     || message.includes('fetch failed')
-    || message.includes('request failed');
+    || message.includes('request failed')
+    || message.includes('timed out')
+    || message.includes('timeout');
 }
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const DEFAULT_PLAYLIST_TIMEOUT_MS = 45000;
+
+function getPlaylistTimeoutMs(): number {
+  const parsed = Number(process.env.PLAYLIST_TIMEOUT_MS || DEFAULT_PLAYLIST_TIMEOUT_MS);
+  if (!Number.isFinite(parsed) || parsed < 10000) return DEFAULT_PLAYLIST_TIMEOUT_MS;
+  return Math.floor(parsed);
+}
+
+async function generatePlaylistWithTimeout(prompt: string, attempt: number): Promise<Awaited<ReturnType<typeof generatePlaylist>>> {
+  const timeoutMs = getPlaylistTimeoutMs();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      generatePlaylist(prompt),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Playlist generation timed out after ${timeoutMs}ms (attempt ${attempt}/3)`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
 interface MergeTagRequest {
@@ -264,18 +291,18 @@ app.post('/api/playlist', async (req, res) => {
     console.log('Generating playlist for:', prompt);
     let result: Awaited<ReturnType<typeof generatePlaylist>>;
     try {
-      result = await generatePlaylist(prompt);
+      result = await generatePlaylistWithTimeout(prompt, 1);
     } catch (firstError) {
       if (!isTransientPlaylistError(firstError)) throw firstError;
       console.log('[api] transient playlist generation error, retrying (attempt 2/3)');
       await sleep(1200);
       try {
-        result = await generatePlaylist(prompt);
+        result = await generatePlaylistWithTimeout(prompt, 2);
       } catch (secondError) {
         if (!isTransientPlaylistError(secondError)) throw secondError;
         console.log('[api] transient playlist generation error, retrying (attempt 3/3)');
         await sleep(2500);
-        result = await generatePlaylist(prompt);
+        result = await generatePlaylistWithTimeout(prompt, 3);
       }
     }
     console.log('Playlist generated, cached:', result.cached);
@@ -291,8 +318,9 @@ app.post('/api/playlist', async (req, res) => {
         || message.includes('strongly verified tracks were found for this credit constraint')
         || message.includes('No verified')
       );
+    const isTimeoutError = typeof message === 'string' && message.toLowerCase().includes('timed out');
     const transient = isTransientPlaylistError(error);
-    res.status(isEvidenceConstraintError ? 422 : transient ? 503 : 500).json({ error: message });
+    res.status(isEvidenceConstraintError ? 422 : isTimeoutError ? 504 : transient ? 503 : 500).json({ error: message });
   }
 });
 

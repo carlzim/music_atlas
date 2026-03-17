@@ -2931,7 +2931,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           }
         }
       } else if (verification && !canUseMusicBrainz) {
-        verification.backfill_skipped_reason = 'unsupported_role';
+        verification.backfill_skipped_reason = canUseTruthCredit
+          ? 'discogs_insufficient_evidence'
+          : 'unsupported_role';
       }
     }
   }

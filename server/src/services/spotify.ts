@@ -9,6 +9,7 @@ export interface SpotifyTrackInfo {
 
 export interface SpotifyTrackCandidateInfo extends SpotifyTrackInfo {
   spotify_uri?: string | null;
+  score?: number | null;
 }
 
 export interface SpotifyTrackDebugInfo extends SpotifyTrackInfo {
@@ -640,6 +641,19 @@ export async function searchTrackCandidateUrls(
   limit = 5,
   targetDurationMs?: number | null
 ): Promise<string[]> {
+  const candidates = await searchTrackCandidates(artist, song, promptContext, limit, targetDurationMs);
+  return candidates
+    .map((item) => item.spotify_url)
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+}
+
+export async function searchTrackCandidates(
+  artist: string,
+  song: string,
+  promptContext = '',
+  limit = 5,
+  targetDurationMs?: number | null
+): Promise<SpotifyTrackCandidateInfo[]> {
   const token = await getAccessToken();
   if (!token) return [];
 
@@ -704,11 +718,25 @@ export async function searchTrackCandidateUrls(
   if (!cacheEntry || cacheEntry.rateLimitedAbort) return [];
 
   const ranked = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue, targetDurationMs)
-    .slice(0, Math.max(1, Math.floor(limit)))
-    .map((item) => item.spotify_url)
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    .slice(0, Math.max(1, Math.floor(limit)));
 
-  return Array.from(new Set(ranked));
+  const seen = new Set<string>();
+  const output: SpotifyTrackCandidateInfo[] = [];
+  for (const item of ranked) {
+    const spotifyUrl = typeof item.spotify_url === 'string' ? item.spotify_url.trim() : '';
+    if (!spotifyUrl || seen.has(spotifyUrl)) continue;
+    seen.add(spotifyUrl);
+    output.push({
+      spotify_url: spotifyUrl,
+      spotify_uri: item.spotify_uri,
+      album_image_url: item.album_image_url,
+      release_year: item.release_year,
+      duration_ms: item.duration_ms,
+      score: item.score,
+    });
+  }
+
+  return output;
 }
 
 export async function searchTrack(artist: string, song: string, promptContext = '', targetDurationMs?: number | null): Promise<SpotifyTrackInfo> {

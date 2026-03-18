@@ -2187,6 +2187,64 @@ function applyGeneralArtistDiversity(tracks: Track[]): Track[] {
   return chosen.length > 0 ? chosen : tracks;
 }
 
+function staggerArtistsForFlow(tracks: Track[]): Track[] {
+  if (tracks.length < 3) return tracks;
+
+  const buckets = new Map<string, Track[]>();
+  const artistOrder: string[] = [];
+  for (const track of tracks) {
+    const artistKey = normalize(track.artist);
+    if (!artistKey) continue;
+    if (!buckets.has(artistKey)) {
+      buckets.set(artistKey, []);
+      artistOrder.push(artistKey);
+    }
+    buckets.get(artistKey)?.push(track);
+  }
+
+  if (artistOrder.length < 2) return tracks;
+
+  const result: Track[] = [];
+  let lastArtist: string | null = null;
+
+  while (result.length < tracks.length) {
+    let selectedArtist: string | null = null;
+    let selectedCount = -1;
+
+    for (const artistKey of artistOrder) {
+      const queue = buckets.get(artistKey);
+      const remaining = queue?.length || 0;
+      if (remaining <= 0) continue;
+      if (artistKey === lastArtist) continue;
+      if (remaining > selectedCount) {
+        selectedArtist = artistKey;
+        selectedCount = remaining;
+      }
+    }
+
+    if (!selectedArtist) {
+      for (const artistKey of artistOrder) {
+        const queue = buckets.get(artistKey);
+        const remaining = queue?.length || 0;
+        if (remaining <= 0) continue;
+        if (remaining > selectedCount) {
+          selectedArtist = artistKey;
+          selectedCount = remaining;
+        }
+      }
+    }
+
+    if (!selectedArtist) break;
+
+    const nextTrack = buckets.get(selectedArtist)?.shift();
+    if (!nextTrack) break;
+    result.push(nextTrack);
+    lastArtist = selectedArtist;
+  }
+
+  return result.length === tracks.length ? result : tracks;
+}
+
 function promptAllowsCreditVariants(prompt: string): boolean {
   const text = normalize(prompt);
   if (!text) return false;
@@ -3143,6 +3201,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     playlist.tracks = applyGeneralArtistDiversity(playlist.tracks);
   }
   playlist.tracks = await sortTracksChronologicallyIfNeeded(translatedPrompt, playlist.tracks);
+  if (!isHistoryOrStoryPrompt(translatedPrompt) && (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit'))) {
+    playlist.tracks = staggerArtistsForFlow(playlist.tracks);
+  }
   if (playlist.tracks.length > MAX_PLAYLIST_TRACKS) {
     playlist.tracks = playlist.tracks.slice(0, MAX_PLAYLIST_TRACKS);
   }

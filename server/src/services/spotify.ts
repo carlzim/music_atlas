@@ -342,6 +342,7 @@ function scoreSpotifyCandidate(
   livePrompt: boolean,
   explicitVenue: string | null,
   allowsInstrumentalOrKaraoke: boolean,
+  allowsCoversOrTributes: boolean,
   targetDurationMs?: number | null
 ): number {
   let score = 0;
@@ -428,6 +429,13 @@ function scoreSpotifyCandidate(
   if (!allowsInstrumentalOrKaraoke) {
     const karaokeOrInstrumentalRegex = /\bkaraoke\b|\binstrumental\b|\bacappella\b|\ba cappella\b/;
     if (karaokeOrInstrumentalRegex.test(titleAndAlbum)) {
+      score -= 2;
+    }
+  }
+
+  if (!allowsCoversOrTributes) {
+    const tributeOrCoverRegex = /\btribute\b|\bcover\b|\boriginally performed by\b|\bsound[-\s]?alike\b/;
+    if (tributeOrCoverRegex.test(titleAndAlbum)) {
       score -= 2;
     }
   }
@@ -675,7 +683,9 @@ function rankSpotifyCandidates(
 ): RankedSpotifyCandidate[] {
   const promptAlbumTokens = getPromptAlbumTokens(promptContext);
   const livePrompt = isLiveOrVenuePrompt(promptContext);
-  const allowsInstrumentalOrKaraoke = /\binstrumental\b|\bkaraoke\b|\ba ?cappella\b|\bbacking track\b/.test(normalizeForMatch(promptContext));
+  const normalizedPromptContext = normalizeForMatch(promptContext);
+  const allowsInstrumentalOrKaraoke = /\binstrumental\b|\bkaraoke\b|\ba ?cappella\b|\bbacking track\b/.test(normalizedPromptContext);
+  const allowsCoversOrTributes = /\bcover\b|\bcovers\b|\btribute\b|\btributes\b/.test(normalizedPromptContext);
   const allowTitleSuffix = Boolean(explicitVenue);
 
   const ranked: RankedSpotifyCandidate[] = [];
@@ -690,6 +700,7 @@ function rankSpotifyCandidates(
       livePrompt,
       explicitVenue,
       allowsInstrumentalOrKaraoke,
+      allowsCoversOrTributes,
       targetDurationMs
     );
     ranked.push({ ...candidate, score });

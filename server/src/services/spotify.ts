@@ -758,8 +758,8 @@ export async function searchTrackWithDiagnostics(
   return searchTrackInternal(artist, song, promptContext, targetDurationMs);
 }
 
-export async function searchTrackByIsrc(isrc: string): Promise<SpotifyTrackInfo> {
-  const candidates = await searchTrackCandidatesByIsrc(isrc, 1);
+export async function searchTrackByIsrc(isrc: string, targetDurationMs?: number | null): Promise<SpotifyTrackInfo> {
+  const candidates = await searchTrackCandidatesByIsrc(isrc, 1, targetDurationMs);
   const best = candidates[0];
   if (!best) {
     return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null };
@@ -772,7 +772,11 @@ export async function searchTrackByIsrc(isrc: string): Promise<SpotifyTrackInfo>
   };
 }
 
-export async function searchTrackCandidatesByIsrc(isrc: string, limit = 5): Promise<SpotifyTrackCandidateInfo[]> {
+export async function searchTrackCandidatesByIsrc(
+  isrc: string,
+  limit = 5,
+  targetDurationMs?: number | null
+): Promise<SpotifyTrackCandidateInfo[]> {
   const normalized = String(isrc || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (normalized.length < 12) {
     return [];
@@ -792,6 +796,13 @@ export async function searchTrackCandidatesByIsrc(isrc: string, limit = 5): Prom
     const ordered = result.candidates
       .slice()
       .sort((a, b) => {
+        if (typeof targetDurationMs === 'number' && Number.isFinite(targetDurationMs) && targetDurationMs > 0) {
+          const aDuration = typeof a.duration_ms === 'number' && Number.isFinite(a.duration_ms) ? a.duration_ms : null;
+          const bDuration = typeof b.duration_ms === 'number' && Number.isFinite(b.duration_ms) ? b.duration_ms : null;
+          const aDelta = aDuration === null ? Number.POSITIVE_INFINITY : Math.abs(aDuration - targetDurationMs);
+          const bDelta = bDuration === null ? Number.POSITIVE_INFINITY : Math.abs(bDuration - targetDurationMs);
+          if (aDelta !== bDelta) return aDelta - bDelta;
+        }
         if (b.popularity !== a.popularity) return b.popularity - a.popularity;
         const aYear = typeof a.release_year === 'number' ? a.release_year : 0;
         const bYear = typeof b.release_year === 'number' ? b.release_year : 0;

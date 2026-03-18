@@ -38,6 +38,18 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getSpotifyChunkFailureCategory(status: number | 'fetch_error', fetchError: string | null): string {
+  if (status === 'fetch_error') {
+    const normalized = (fetchError || '').toLowerCase();
+    if (normalized.includes('request_timeout_after_')) return 'request_timeout';
+    return 'network_error';
+  }
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'spotify_server_error';
+  if (status >= 400) return 'spotify_client_error';
+  return 'unknown_error';
+}
+
 const DEFAULT_PLAYLIST_TIMEOUT_MS = 45000;
 const DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS = 20000;
 const DEFAULT_SPOTIFY_ADD_TRACKS_MAX_ATTEMPTS = 3;
@@ -1127,6 +1139,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         }
 
         const chunkFailureStatus = addTracksResponse ? addTracksResponse.status : 'fetch_error';
+        const chunkFailureCategory = getSpotifyChunkFailureCategory(chunkFailureStatus, addTracksFetchError);
         const isTransientChunkError = !addTracksResponse || addTracksResponse.status === 429 || addTracksResponse.status >= 500;
         const retryAfterHeader = addTracksResponse?.headers.get('Retry-After') || null;
         const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
@@ -1164,6 +1177,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           totalChunks: uriChunks.length,
           failedChunkAttempt: attempt,
           failedChunkStatus: chunkFailureStatus,
+          failedChunkCategory: chunkFailureCategory,
+          failedChunkTransient: isTransientChunkError,
           failedChunkError: addTracksFetchError,
           failedChunkTimeoutMs: addTracksRequestTimeoutMs,
           addTracksAttemptsTotal,
@@ -1209,6 +1224,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           addedBeforeFailure: addedToSpotifyCount,
           failedChunkIndex: chunkIndex + 1,
           totalChunks: uriChunks.length,
+          failedChunkCategory: 'unknown_error',
+          failedChunkTransient: false,
           addTracksAttemptsTotal,
           addTracksChunksRetried,
           failedChunkTimeoutMs: addTracksRequestTimeoutMs,

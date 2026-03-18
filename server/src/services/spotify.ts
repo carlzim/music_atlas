@@ -762,6 +762,8 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
   if (isExpired) {
     const requested = getRequestedArtistKeys(artist);
     const safeSong = sanitizeQueryValue(cleanSongTitle(song) || song);
+    const safeSongAscii = sanitizeQueryValue(stripDiacritics(cleanSongTitle(song) || song));
+    const hasDistinctAsciiSong = safeSongAscii.length > 0 && safeSongAscii !== safeSong;
     const safeArtist = sanitizeQueryValue(requested.primaryArtist || artist);
     const safeOriginalArtist = sanitizeQueryValue(artist);
     const hasDistinctOriginalArtist = safeOriginalArtist.length > 0 && safeOriginalArtist !== safeArtist;
@@ -807,6 +809,18 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
           result = await searchSpotify(originalFallbackQuery, token, 10);
         }
       }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctAsciiSong) {
+        const structuredAsciiQuery = safeVenue
+          ? `track:"${safeSongAscii}" artist:"${safeArtist}" ${safeVenue}`
+          : `track:"${safeSongAscii}" artist:"${safeArtist}"`;
+        const fallbackAsciiQuery = safeVenue
+          ? `${safeSongAscii} ${safeArtist} ${safeVenue}`.trim()
+          : `${safeSongAscii} ${safeArtist}`.trim();
+        result = await searchSpotify(structuredAsciiQuery, token, 10);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(fallbackAsciiQuery, token, 10);
+        }
+      }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(artistOnlyStructuredQuery, token, 10);
       }
@@ -835,6 +849,12 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(titleOnlyFallbackQuery, token, 10);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctAsciiSong) {
+        result = await searchSpotify(`track:"${safeSongAscii}"`, token, 10);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(safeSongAscii, token, 10);
+        }
       }
       cacheEntry = {
         candidates: result.candidates,
@@ -987,6 +1007,8 @@ export async function searchTrackCandidates(
   if (isExpired || needsMoreCandidates) {
     const requested = getRequestedArtistKeys(artist);
     const safeSong = sanitizeQueryValue(cleanSongTitle(song) || song);
+    const safeSongAscii = sanitizeQueryValue(stripDiacritics(cleanSongTitle(song) || song));
+    const hasDistinctAsciiSong = safeSongAscii.length > 0 && safeSongAscii !== safeSong;
     const safeArtist = sanitizeQueryValue(requested.primaryArtist || artist);
     const safeOriginalArtist = sanitizeQueryValue(artist);
     const hasDistinctOriginalArtist = safeOriginalArtist.length > 0 && safeOriginalArtist !== safeArtist;
@@ -1026,6 +1048,18 @@ export async function searchTrackCandidates(
           result = await searchSpotify(originalFallbackQuery, token, spotifyFetchLimit);
         }
       }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctAsciiSong) {
+        const structuredAsciiQuery = safeVenue
+          ? `track:"${safeSongAscii}" artist:"${safeArtist}" ${safeVenue}`
+          : `track:"${safeSongAscii}" artist:"${safeArtist}"`;
+        const fallbackAsciiQuery = safeVenue
+          ? `${safeSongAscii} ${safeArtist} ${safeVenue}`.trim()
+          : `${safeSongAscii} ${safeArtist}`.trim();
+        result = await searchSpotify(structuredAsciiQuery, token, spotifyFetchLimit);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(fallbackAsciiQuery, token, spotifyFetchLimit);
+        }
+      }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(artistOnlyStructuredQuery, token, spotifyFetchLimit);
       }
@@ -1054,6 +1088,12 @@ export async function searchTrackCandidates(
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(titleOnlyFallbackQuery, token, spotifyFetchLimit);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctAsciiSong) {
+        result = await searchSpotify(`track:"${safeSongAscii}"`, token, spotifyFetchLimit);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(safeSongAscii, token, spotifyFetchLimit);
+        }
       }
       cacheEntry = {
         candidates: result.candidates,

@@ -96,6 +96,40 @@ Retry tuning knobs (`server/.env`):
 - `SPOTIFY_ADD_TRACKS_BASE_RETRY_DELAY_MS` (min 100)
 - `SPOTIFY_ADD_TRACKS_MAX_RETRY_DELAY_MS` (min 500)
 
+### Spotify match diagnostics (v1)
+
+`POST /api/spotify/save-playlist/:id` now includes search-quality diagnostics even on successful saves:
+
+- `searchScoreBands`: coarse distribution for search-selected matches.
+  - `strong` (`score >= 6`)
+  - `good` (`score >= 3`)
+  - `weak` (`score >= 1`)
+  - `uncertain` (`score <= 0`)
+  - `unknown` (no numeric score captured)
+- `searchScoreSummary`: aggregate quality snapshot.
+  - `scoredCount`, `average`, `min`, `max`
+
+Quick interpretation:
+
+- High `strong + good`: search ranking quality is healthy.
+- Rising `weak + uncertain`: likely drift in title/artist matching quality; review recent ranking heuristics.
+- High `unknown`: scoring path may be bypassed by non-search sources or missing score propagation.
+
+### Spotify ranking heuristics (v1)
+
+Current ranking intentionally prefers canonical versions unless prompts explicitly request variants.
+
+- Primary artist matches are boosted over featured-only matches.
+- Crowded featured-only entries get a slight penalty.
+- Variant types are downranked by default unless requested:
+  - karaoke / instrumental / a cappella
+  - tribute / cover
+  - sped up / slowed / nightcore / reverb / 8d
+  - remix / edit / rework / mashup / flip
+- On score ties, non-variant candidates are preferred before popularity/year tie-breakers.
+
+This keeps default user requests closer to standard/canonical recordings while preserving expected behavior for explicit variant prompts.
+
 ## If A Check Fails
 
 1. Run `npm run eval:coverage` to inspect current counts.

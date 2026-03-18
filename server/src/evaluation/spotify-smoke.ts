@@ -9,6 +9,7 @@ interface SpotifySmokeCase {
   expectedHint?: string;
   minScore?: number;
   required?: boolean;
+  forbidTerms?: string[];
 }
 
 const CASES: SpotifySmokeCase[] = [
@@ -46,6 +47,26 @@ const CASES: SpotifySmokeCase[] = [
     expectedHint: 'spotify.com/track/',
     minScore: 4,
     required: false,
+  },
+  {
+    id: 'bowie_berlin_prompt_should_avoid_soundtrack_or_remix_bias',
+    artist: 'David Bowie',
+    song: 'A New Career in a New Town',
+    prompt: 'The best of David Bowies Berlin era',
+    expectedHint: 'spotify.com/track/',
+    minScore: 1,
+    required: false,
+    forbidTerms: ['soundtrack', 'remix', 'live', 'from the soundtrack', 'motion picture'],
+  },
+  {
+    id: 'non_film_prompt_should_avoid_soundtrack_album_bias',
+    artist: 'David Bowie',
+    song: 'Speed of Life',
+    prompt: 'Best songs from the Bowie Berlin trilogy',
+    expectedHint: 'spotify.com/track/',
+    minScore: 1,
+    required: false,
+    forbidTerms: ['soundtrack', 'motion picture', 'film'],
   },
   {
     id: 'britpop_prompt_should_match_standard_version',
@@ -90,6 +111,16 @@ async function run(): Promise<void> {
       console.log(`[eval:spotify] WARN ${testCase.id} -> matched ${url} score=${result.score} < minScore=${testCase.minScore}`);
       if (strict && testCase.required) failedRequired += 1;
       continue;
+    }
+
+    if (Array.isArray(testCase.forbidTerms) && testCase.forbidTerms.length > 0) {
+      const haystack = `${result.matchedTitle || ''} ${result.matchedAlbumTitle || ''}`.toLowerCase();
+      const hit = testCase.forbidTerms.find((term) => haystack.includes(term.toLowerCase()));
+      if (hit) {
+        console.log(`[eval:spotify] WARN ${testCase.id} -> matched ${url} contains forbidden term "${hit}" in title/album`);
+        if (strict && testCase.required) failedRequired += 1;
+        continue;
+      }
     }
 
     console.log(`[eval:spotify] PASS ${testCase.id} -> matched ${url} score=${result.score}`);

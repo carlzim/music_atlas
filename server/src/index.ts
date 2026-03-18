@@ -1027,31 +1027,51 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     }
 
     const addTracksUrl = `https://api.spotify.com/v1/playlists/${created.id}/items`;
-    const addTracksBody = { uris: dedupedUris };
+    const TRACKS_PER_ADD_REQUEST = 100;
+    const uriChunks: string[][] = [];
+    for (let i = 0; i < dedupedUris.length; i += TRACKS_PER_ADD_REQUEST) {
+      uriChunks.push(dedupedUris.slice(i, i + TRACKS_PER_ADD_REQUEST));
+    }
+
     console.log('[spotify-save] created playlist id:', created.id);
     console.log('[spotify-save] add-tracks url:', addTracksUrl);
-    console.log('[spotify-save] add-tracks body:', addTracksBody);
+    console.log('[spotify-save] add-tracks chunks:', uriChunks.length);
 
-    const addTracksResponse = await fetch(addTracksUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(addTracksBody),
-    });
+    let addedToSpotifyCount = 0;
+    for (let chunkIndex = 0; chunkIndex < uriChunks.length; chunkIndex += 1) {
+      const chunk = uriChunks[chunkIndex];
+      const addTracksBody = { uris: chunk };
+      console.log('[spotify-save] add-tracks chunk:', { chunkIndex: chunkIndex + 1, chunkSize: chunk.length });
 
-    if (!addTracksResponse.ok) {
-      let addTracksBody: unknown = null;
-      try {
-        addTracksBody = await addTracksResponse.json();
-      } catch {
-        addTracksBody = null;
+      const addTracksResponse = await fetch(addTracksUrl, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(addTracksBody),
+      });
+
+      if (!addTracksResponse.ok) {
+        let addTracksErrorBody: unknown = null;
+        try {
+          addTracksErrorBody = await addTracksResponse.json();
+        } catch {
+          addTracksErrorBody = null;
+        }
+        console.error('[spotify-save] add-tracks failed status:', addTracksResponse.status);
+        console.error('[spotify-save] add-tracks failed body:', addTracksErrorBody);
+        console.error('[spotify-save] add-tracks failed chunk index:', chunkIndex + 1);
+        res.status(500).json({
+          error: 'Playlist created, but failed to add tracks',
+          addedBeforeFailure: addedToSpotifyCount,
+          failedChunkIndex: chunkIndex + 1,
+          totalChunks: uriChunks.length,
+        });
+        return;
       }
-      console.error('[spotify-save] add-tracks failed status:', addTracksResponse.status);
-      console.error('[spotify-save] add-tracks failed body:', addTracksBody);
-      res.status(500).json({ error: 'Playlist created, but failed to add tracks' });
-      return;
+
+      addedToSpotifyCount += chunk.length;
     }
 
     const persistedTrackSpotifyUrls = updatePlaylistTrackSpotifyUrls(id, playlistTrackSpotifyUpdates);

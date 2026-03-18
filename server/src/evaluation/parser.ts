@@ -655,6 +655,116 @@ function runJsonParseRepairCase(): ParserCaseResult {
   }
 }
 
+function runArtistFieldFeaturingSplitCase(): ParserCaseResult {
+  const id = 'playlist_parse_artist_field_featuring_split';
+  const payload = JSON.stringify({
+    title: 'Test',
+    description: 'Test',
+    tracks: [
+      {
+        artist: 'Lill Lindfors, duett med Billy Gezon',
+        song: 'Sa vill jag bli',
+        reason: 'Test reason',
+      },
+    ],
+  });
+
+  try {
+    const parsed = parsePlaylistResponseForEval(payload);
+    const track = parsed.tracks[0] as {
+      artist?: string;
+      featured_artists?: string[];
+      artist_display?: string;
+    };
+    const featured = Array.isArray(track.featured_artists) ? track.featured_artists : [];
+    const pass = track.artist === 'Lill Lindfors'
+      && featured.includes('Billy Gezon')
+      && track.artist_display === 'Lill Lindfors, duett med Billy Gezon';
+    return {
+      id,
+      pass,
+      details: `artist="${track.artist || ''}" featured=${JSON.stringify(featured)} display="${track.artist_display || ''}"`,
+    };
+  } catch (error) {
+    return {
+      id,
+      pass: false,
+      details: `parse error=${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function runSongTitleFeaturingExtractCase(): ParserCaseResult {
+  const id = 'playlist_parse_song_title_featuring_extract';
+  const payload = JSON.stringify({
+    title: 'Test',
+    description: 'Test',
+    tracks: [
+      {
+        artist: 'Pugh Rogefeldt',
+        song: 'Bla jeans och stjarnljus (feat. Lill Lindfors)',
+        reason: 'Test reason',
+      },
+    ],
+  });
+
+  try {
+    const parsed = parsePlaylistResponseForEval(payload);
+    const track = parsed.tracks[0] as {
+      artist?: string;
+      song?: string;
+      featured_artists?: string[];
+    };
+    const featured = Array.isArray(track.featured_artists) ? track.featured_artists : [];
+    const pass = track.artist === 'Pugh Rogefeldt'
+      && track.song === 'Bla jeans och stjarnljus'
+      && featured.includes('Lill Lindfors');
+    return {
+      id,
+      pass,
+      details: `artist="${track.artist || ''}" song="${track.song || ''}" featured=${JSON.stringify(featured)}`,
+    };
+  } catch (error) {
+    return {
+      id,
+      pass: false,
+      details: `parse error=${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function runFullArtistNamePreservedCase(): ParserCaseResult {
+  const id = 'playlist_parse_full_artist_name_preserved';
+  const payload = JSON.stringify({
+    title: 'Test',
+    description: 'Test',
+    tracks: [
+      {
+        artist: 'Ann-Louise Hansson',
+        song: 'Alla min langtan',
+        reason: 'Test reason',
+      },
+    ],
+  });
+
+  try {
+    const parsed = parsePlaylistResponseForEval(payload);
+    const track = parsed.tracks[0] as { artist?: string };
+    const pass = track.artist === 'Ann-Louise Hansson';
+    return {
+      id,
+      pass,
+      details: `artist="${track.artist || ''}"`,
+    };
+  } catch (error) {
+    return {
+      id,
+      pass: false,
+      details: `parse error=${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 function run(): void {
   const strict = process.argv.includes('--strict');
   const results: ParserCaseResult[] = [
@@ -702,6 +812,9 @@ function run(): void {
     runEngineerEnglishMixedByCase(),
     runArrangerSwedishArrangedByCase(),
     runJsonParseRepairCase(),
+    runArtistFieldFeaturingSplitCase(),
+    runSongTitleFeaturingExtractCase(),
+    runFullArtistNamePreservedCase(),
   ];
 
   const passed = results.filter((item) => item.pass).length;

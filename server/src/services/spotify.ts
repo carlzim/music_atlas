@@ -344,6 +344,7 @@ function scoreSpotifyCandidate(
   allowsInstrumentalOrKaraoke: boolean,
   allowsCoversOrTributes: boolean,
   allowsSpeedVariants: boolean,
+  allowsRemixVariants: boolean,
   targetDurationMs?: number | null
 ): number {
   let score = 0;
@@ -445,6 +446,13 @@ function scoreSpotifyCandidate(
     const speedVariantRegex = /\bsped\s*up\b|\bslowed\b|\bnightcore\b|\bchopped\s*and\s*screwed\b|\breverb\b|\b8d\b/;
     if (speedVariantRegex.test(titleAndAlbum)) {
       score -= 2;
+    }
+  }
+
+  if (!allowsRemixVariants) {
+    const remixVariantRegex = /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/;
+    if (remixVariantRegex.test(titleAndAlbum)) {
+      score -= 1;
     }
   }
 
@@ -692,9 +700,12 @@ function rankSpotifyCandidates(
   const promptAlbumTokens = getPromptAlbumTokens(promptContext);
   const livePrompt = isLiveOrVenuePrompt(promptContext);
   const normalizedPromptContext = normalizeForMatch(promptContext);
+  const normalizedRequestedSong = normalizeForMatch(song);
   const allowsInstrumentalOrKaraoke = /\binstrumental\b|\bkaraoke\b|\ba ?cappella\b|\bbacking track\b/.test(normalizedPromptContext);
   const allowsCoversOrTributes = /\bcover\b|\bcovers\b|\btribute\b|\btributes\b/.test(normalizedPromptContext);
   const allowsSpeedVariants = /\bsped\s*up\b|\bslowed\b|\bnightcore\b|\bchopped\s*and\s*screwed\b|\breverb\b|\b8d\b/.test(normalizedPromptContext);
+  const allowsRemixVariants = /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/.test(normalizedPromptContext)
+    || /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/.test(normalizedRequestedSong);
   const allowTitleSuffix = Boolean(explicitVenue);
 
   const ranked: RankedSpotifyCandidate[] = [];
@@ -711,6 +722,7 @@ function rankSpotifyCandidates(
       allowsInstrumentalOrKaraoke,
       allowsCoversOrTributes,
       allowsSpeedVariants,
+      allowsRemixVariants,
       targetDurationMs
     );
     ranked.push({ ...candidate, score });

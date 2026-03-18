@@ -705,6 +705,32 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   let searchedSpotifyMatches = 0;
   let uncertainSearchMatches = 0;
   const uncertainTracks: Array<{ artist: string; song: string; score: number }> = [];
+  const searchScoreBands = {
+    strong: 0,
+    good: 0,
+    weak: 0,
+    uncertain: 0,
+    unknown: 0,
+  };
+  const bucketSearchScore = (score: number | null): void => {
+    if (typeof score !== 'number' || !Number.isFinite(score)) {
+      searchScoreBands.unknown += 1;
+      return;
+    }
+    if (score >= 6) {
+      searchScoreBands.strong += 1;
+      return;
+    }
+    if (score >= 3) {
+      searchScoreBands.good += 1;
+      return;
+    }
+    if (score >= 1) {
+      searchScoreBands.weak += 1;
+      return;
+    }
+    searchScoreBands.uncertain += 1;
+  };
   for (const track of trackQueries) {
     let matchedCurrentTrack = false;
     let skipReason = 'no_match_found';
@@ -943,6 +969,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         uris.push(selectedUri);
         usedUris.add(selectedUri);
         searchedSpotifyMatches += 1;
+        bucketSearchScore(selectedScore);
         matchedTracks.push({ artist: track.artist, song: track.song, source: 'search', score: selectedScore });
         if (typeof selectedScore === 'number' && selectedScore <= 0) {
           uncertainSearchMatches += 1;
@@ -1015,6 +1042,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         isrc: matchedViaIsrc,
         search: searchedSpotifyMatches,
       },
+      searchScoreBands,
     });
     return;
   }
@@ -1201,6 +1229,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             isrc: matchedViaIsrc,
             search: searchedSpotifyMatches,
           },
+          searchScoreBands,
           addTracksChunkStats: {
             totalChunks: uriChunks.length,
             totalAttempts: addTracksAttemptsTotal,
@@ -1251,6 +1280,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             isrc: matchedViaIsrc,
             search: searchedSpotifyMatches,
           },
+          searchScoreBands,
           addTracksChunkStats: {
             totalChunks: uriChunks.length,
             totalAttempts: addTracksAttemptsTotal,
@@ -1296,6 +1326,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         isrc: matchedViaIsrc,
         search: searchedSpotifyMatches,
       },
+      searchScoreBands,
       addTracksChunkStats: {
         totalChunks: uriChunks.length,
         totalAttempts: addTracksAttemptsTotal,

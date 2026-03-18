@@ -896,7 +896,7 @@ function PlaylistPage() {
     skipped: number;
     duplicateUriMatches: number;
     uncertainMatches: number;
-    skippedTracks: Array<{ artist: string; song: string }>;
+    skippedTracks: Array<{ artist: string; song: string; reason?: string }>;
     matchSources?: {
       trackSpotifyUrl?: number;
       recordingSpotifyUrl?: number;
@@ -1041,6 +1041,13 @@ function PlaylistPage() {
                     && typeof (item as { song?: unknown }).song === 'string'
                 );
               })
+              .map((item) => ({
+                artist: item.artist,
+                song: item.song,
+                reason: typeof (item as { reason?: unknown }).reason === 'string'
+                  ? (item as { reason: string }).reason
+                  : undefined,
+              }))
               .slice(0, 20)
           : [],
         matchSources: data.matchSources && typeof data.matchSources === 'object'
@@ -1173,7 +1180,7 @@ function PlaylistPage() {
                 <ul className="playlist-list">
                   {spotifyMatchDetails.skippedTracks.map((track, idx) => (
                     <li key={`${track.artist}-${track.song}-${idx}`} className="playlist-item">
-                      {track.song} - {track.artist}
+                      {track.song} - {track.artist}{track.reason ? ` (${track.reason.replace(/_/g, ' ')})` : ''}
                     </li>
                   ))}
                 </ul>

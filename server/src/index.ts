@@ -648,7 +648,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   const usedUris = new Set<string>();
   const playlistTrackSpotifyUpdates: Array<{ artist: string; song: string; spotifyUrl: string }> = [];
   let matchedTrackCount = 0;
-  const skippedTracks: Array<{ artist: string; song: string }> = [];
+  const skippedTracks: Array<{ artist: string; song: string; reason: string }> = [];
   let reusedExistingSpotifyUrls = 0;
   let reusedRecordingSpotifyUrls = 0;
   let matchedViaIsrc = 0;
@@ -657,7 +657,11 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   let uncertainSearchMatches = 0;
   for (const track of trackQueries) {
     let matchedCurrentTrack = false;
+    let skipReason = 'no_match_found';
     const existingUri = typeof track.spotify_url === 'string' ? spotifyUrlToUri(track.spotify_url) : null;
+    if (existingUri && usedUris.has(existingUri)) {
+      skipReason = 'existing_uri_already_used';
+    }
     if (existingUri && !usedUris.has(existingUri)) {
       uris.push(existingUri);
       usedUris.add(existingUri);
@@ -672,6 +676,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
     const storedSpotifyUrl = getRecordingSpotifyUrl(track.artist, track.song);
     const storedUri = storedSpotifyUrl ? spotifyUrlToUri(storedSpotifyUrl) : null;
+    if (storedUri && usedUris.has(storedUri)) {
+      skipReason = 'cached_uri_already_used';
+    }
     if (storedUri && !usedUris.has(storedUri)) {
       uris.push(storedUri);
       usedUris.add(storedUri);
@@ -706,10 +713,15 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     if (recordingIsrc) {
       try {
         const spotifyIsrcCandidates = await searchTrackCandidatesByIsrc(recordingIsrc, 6);
+        let isrcCollisionCount = 0;
         for (const candidate of spotifyIsrcCandidates) {
           if (!candidate.spotify_url) continue;
           const uri = spotifyUrlToUri(candidate.spotify_url);
-          if (!uri || usedUris.has(uri)) continue;
+          if (!uri) continue;
+          if (usedUris.has(uri)) {
+            isrcCollisionCount += 1;
+            continue;
+          }
           uris.push(uri);
           usedUris.add(uri);
           matchedViaIsrc += 1;
@@ -721,6 +733,12 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           matchedCurrentTrack = true;
           matchedTrackCount += 1;
           break;
+        }
+
+        if (!matchedCurrentTrack && spotifyIsrcCandidates.length > 0 && isrcCollisionCount > 0) {
+          skipReason = isrcCollisionCount >= spotifyIsrcCandidates.length
+            ? 'isrc_uri_collision'
+            : 'isrc_candidate_mismatch';
         }
 
         if (matchedCurrentTrack) continue;
@@ -741,14 +759,19 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             matchedTrackCount += 1;
             continue;
           }
+          if (uri && usedUris.has(uri)) {
+            skipReason = 'isrc_primary_uri_collision';
+          }
         }
       } catch (error) {
         console.log('[spotify-save] isrc spotify lookup skipped:', { artist: track.artist, song: track.song, isrc: recordingIsrc, error: error instanceof Error ? error.message : String(error) });
+        skipReason = 'isrc_lookup_error';
       }
     }
 
     try {
       const candidates = await searchTrackCandidates(track.artist, track.song, playlist.prompt, 6, recordingDurationMs);
+      let candidateUriCollisionCount = 0;
       let selectedUrl: string | null = null;
       let selectedUri: string | null = null;
       let selectedDurationMs: number | null = null;
@@ -759,7 +782,10 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         if (!candidateUrl) continue;
         const candidateUri = spotifyUrlToUri(candidateUrl);
         if (!candidateUri) continue;
-        if (usedUris.has(candidateUri)) continue;
+        if (usedUris.has(candidateUri)) {
+          candidateUriCollisionCount += 1;
+          continue;
+        }
         selectedUrl = candidateUrl;
         selectedUri = candidateUri;
         selectedDurationMs = typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms)
@@ -769,6 +795,14 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           ? candidate.score
           : null;
         break;
+      }
+
+      if (!selectedUrl) {
+        if (candidates.length === 0) {
+          skipReason = 'search_no_candidates';
+        } else if (candidateUriCollisionCount >= candidates.length) {
+          skipReason = 'search_uri_collision';
+        }
       }
 
       if (!selectedUrl || !selectedUri) {
@@ -784,7 +818,11 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             selectedScore = typeof spotifyInfo.score === 'number' && Number.isFinite(spotifyInfo.score)
               ? spotifyInfo.score
               : null;
+          } else if (fallbackUri && usedUris.has(fallbackUri)) {
+            skipReason = 'fallback_uri_collision';
           }
+        } else {
+          skipReason = 'fallback_no_match';
         }
       }
 
@@ -805,10 +843,11 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       }
     } catch (error) {
       console.error('[spotify-save] track match failed:', { artist: track.artist, song: track.song, error });
+      skipReason = 'search_error';
     }
 
     if (!matchedCurrentTrack) {
-      skippedTracks.push({ artist: track.artist, song: track.song });
+      skippedTracks.push({ artist: track.artist, song: track.song, reason: skipReason });
     }
   }
 

@@ -765,6 +765,45 @@ function runFullArtistNamePreservedCase(): ParserCaseResult {
   }
 }
 
+function runArtistFieldSwedishOchSplitCase(): ParserCaseResult {
+  const id = 'playlist_parse_artist_field_swedish_och_split';
+  const payload = JSON.stringify({
+    title: 'Test',
+    description: 'Test',
+    tracks: [
+      {
+        artist: 'Lill Lindfors och Anders Linder',
+        song: 'Tank vilket liv',
+        reason: 'Test reason',
+      },
+    ],
+  });
+
+  try {
+    const parsed = parsePlaylistResponseForEval(payload);
+    const track = parsed.tracks[0] as {
+      artist?: string;
+      featured_artists?: string[];
+      artist_display?: string;
+    };
+    const featured = Array.isArray(track.featured_artists) ? track.featured_artists : [];
+    const pass = track.artist === 'Lill Lindfors'
+      && featured.includes('Anders Linder')
+      && track.artist_display === 'Lill Lindfors och Anders Linder';
+    return {
+      id,
+      pass,
+      details: `artist="${track.artist || ''}" featured=${JSON.stringify(featured)} display="${track.artist_display || ''}"`,
+    };
+  } catch (error) {
+    return {
+      id,
+      pass: false,
+      details: `parse error=${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 function run(): void {
   const strict = process.argv.includes('--strict');
   const results: ParserCaseResult[] = [
@@ -813,6 +852,7 @@ function run(): void {
     runArrangerSwedishArrangedByCase(),
     runJsonParseRepairCase(),
     runArtistFieldFeaturingSplitCase(),
+    runArtistFieldSwedishOchSplitCase(),
     runSongTitleFeaturingExtractCase(),
     runFullArtistNamePreservedCase(),
   ];

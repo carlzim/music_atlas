@@ -1258,7 +1258,7 @@ export function getPlaylistById(id: number): PlaylistRow | undefined {
 
 export function updatePlaylistTrackSpotifyUrls(
   playlistId: number,
-  updates: Array<{ artist: string; song: string; spotifyUrl: string }>
+  updates: Array<{ artist: string; song: string; spotifyUrl?: string; spotifyUri?: string }>
 ): number {
   if (!Number.isFinite(playlistId) || playlistId <= 0 || updates.length === 0) return 0;
 
@@ -1273,17 +1273,18 @@ export function updatePlaylistTrackSpotifyUrls(
   }
   if (!Array.isArray(parsedTracks)) return 0;
 
-  const urlByRecordingKey = new Map<string, string>();
+  const linksByRecordingKey = new Map<string, { spotifyUrl: string; spotifyUri: string }>();
   for (const item of updates) {
     const artist = canonicalizeDisplayName(item.artist || '');
     const title = String(item.song || '').trim();
     const spotifyUrl = String(item.spotifyUrl || '').trim();
+    const spotifyUri = normalizeSpotifyUri(item.spotifyUri || '');
     const key = buildRecordingCanonicalKey(artist, title);
-    if (!key || !spotifyUrl) continue;
-    urlByRecordingKey.set(key, spotifyUrl);
+    if (!key || (!spotifyUrl && !spotifyUri)) continue;
+    linksByRecordingKey.set(key, { spotifyUrl, spotifyUri });
   }
 
-  if (urlByRecordingKey.size === 0) return 0;
+  if (linksByRecordingKey.size === 0) return 0;
 
   let updatedCount = 0;
   const nextTracks = parsedTracks.map((track) => {
@@ -1296,17 +1297,24 @@ export function updatePlaylistTrackSpotifyUrls(
       : '';
     const key = buildRecordingCanonicalKey(artist, song);
     if (!key) return track;
-    const spotifyUrl = urlByRecordingKey.get(key);
-    if (!spotifyUrl) return track;
+    const links = linksByRecordingKey.get(key);
+    if (!links) return track;
+
+    const spotifyUrl = links.spotifyUrl || '';
+    const spotifyUri = links.spotifyUri || '';
 
     const current = typeof (track as { spotify_url?: unknown }).spotify_url === 'string'
       ? (track as { spotify_url: string }).spotify_url.trim()
       : '';
-    if (current === spotifyUrl) return track;
+    const currentUri = typeof (track as { spotify_uri?: unknown }).spotify_uri === 'string'
+      ? normalizeSpotifyUri((track as { spotify_uri: string }).spotify_uri)
+      : '';
+    if (current === spotifyUrl && currentUri === spotifyUri) return track;
     updatedCount += 1;
     return {
       ...track,
-      spotify_url: spotifyUrl,
+      ...(spotifyUrl ? { spotify_url: spotifyUrl } : {}),
+      ...(spotifyUri ? { spotify_uri: spotifyUri } : {}),
     };
   });
 

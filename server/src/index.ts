@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
-import { searchTrack, searchTrackByIsrc, searchTrackCandidateUrls, searchTrackCandidatesByIsrc } from './services/spotify.js';
+import { searchTrack, searchTrackByIsrc, searchTrackCandidates, searchTrackCandidatesByIsrc } from './services/spotify.js';
 import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUrl, updatePlaylistTrackSpotifyUrls } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
 import { resolveMusicBrainzRecordingMetadata } from './services/musicbrainz.js';
@@ -747,17 +747,22 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     }
 
     try {
-      const candidateUrls = await searchTrackCandidateUrls(track.artist, track.song, playlist.prompt, 6, recordingDurationMs);
+      const candidates = await searchTrackCandidates(track.artist, track.song, playlist.prompt, 6, recordingDurationMs);
       let selectedUrl: string | null = null;
       let selectedUri: string | null = null;
       let selectedDurationMs: number | null = null;
 
-      for (const candidateUrl of candidateUrls) {
+      for (const candidate of candidates) {
+        const candidateUrl = candidate.spotify_url;
+        if (!candidateUrl) continue;
         const candidateUri = spotifyUrlToUri(candidateUrl);
         if (!candidateUri) continue;
         if (usedUris.has(candidateUri)) continue;
         selectedUrl = candidateUrl;
         selectedUri = candidateUri;
+        selectedDurationMs = typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms)
+          ? candidate.duration_ms
+          : null;
         break;
       }
 

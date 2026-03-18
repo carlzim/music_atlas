@@ -12,6 +12,8 @@ interface Track {
   artist: string;
   song: string;
   reason: string;
+  featured_artists?: string[];
+  artist_display?: string;
   spotify_url?: string | null;
   album_image_url?: string | null;
   release_year?: number | null;
@@ -2649,6 +2651,8 @@ Requirements:
 - The description must be in English and explain the theme
 - Include 10-15 tracks
 - Each track must have: artist name, song title, and a short explanation (1-2 sentences) of WHY this song was chosen
+- Always use the full primary artist name (never shortened first-name-only forms).
+- If a track has guest artists, keep the main artist in 'artist' and put guests in the song title as '(feat. Guest Name)'.
 - Make the playlist feel nerdy, curated, and musically interesting - avoid generic choices
 - Show your music knowledge by selecting interesting artists and songs
 - Safety rule: never invent factual credit claims.
@@ -3438,12 +3442,68 @@ function parsePlaylistResponse(text: string): Playlist {
     return next.replace(/\s+/g, ' ').trim();
   };
 
+  const splitCollaboratorNames = (value: string): string[] => {
+    return value
+      .split(/\s*(?:,|&|\band\b|\bx\b|\+)\s*/i)
+      .map((item) => canonicalizeDisplayName(item))
+      .map((item) => item.replace(/^[-:\s]+/, '').replace(/[.!?,;:]+$/g, '').trim())
+      .filter((item) => item.length > 0)
+      .filter((item) => item.length <= 80);
+  };
+
+  const normalizeGeneratedArtistEntry = (value: string): { mainArtist: string; featuredArtists: string[]; displayArtist: string } => {
+    const displayArtist = sanitizeGeneratedArtistName(value);
+    if (!displayArtist) return { mainArtist: '', featuredArtists: [], displayArtist: '' };
+
+    const normalizedDisplay = displayArtist
+      .replace(/[“”]/g, '"')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const markerMatch = normalizedDisplay.match(/^(.*?)\s*(?:,?\s*(?:feat\.?|featuring|ft\.?|duett\s+med|duet\s+with|with)\s+)(.+)$/i);
+    if (!markerMatch) {
+      return { mainArtist: normalizedDisplay, featuredArtists: [], displayArtist: normalizedDisplay };
+    }
+
+    const mainArtist = sanitizeGeneratedArtistName(markerMatch[1] || '');
+    const featuredArtists = splitCollaboratorNames(markerMatch[2] || '');
+    const dedupedFeatured = Array.from(new Set(featuredArtists.map((name) => canonicalizeDisplayName(name))))
+      .filter((name) => normalize(name) !== normalize(mainArtist));
+
+    return {
+      mainArtist,
+      featuredArtists: dedupedFeatured,
+      displayArtist: normalizedDisplay,
+    };
+  };
+
   const sanitizeGeneratedSongTitle = (value: string): string => {
     return value
       .trim()
       .replace(/^(song|track)\s*[:\-]\s*/i, '')
       .replace(/\s+/g, ' ')
       .trim();
+  };
+
+  const extractFeaturedArtistsFromSongTitle = (value: string): { cleanSong: string; featuredArtists: string[] } => {
+    const source = sanitizeGeneratedSongTitle(value);
+    if (!source) return { cleanSong: '', featuredArtists: [] };
+
+    const featuredNames: string[] = [];
+    let cleanSong = source;
+    const featureRegex = /\((?:feat\.?|featuring|ft\.?)\s+([^)]{1,120})\)/ig;
+    cleanSong = cleanSong.replace(featureRegex, (_match, group: string) => {
+      featuredNames.push(...splitCollaboratorNames(group || ''));
+      return '';
+    }).replace(/\s+/g, ' ').trim();
+
+    cleanSong = cleanSong.replace(/\s*[-–—]\s*(?:feat\.?|featuring|ft\.?)\s+(.+)$/i, (_match, group: string) => {
+      featuredNames.push(...splitCollaboratorNames(group || ''));
+      return '';
+    }).replace(/\s+/g, ' ').trim();
+
+    const dedupedFeatured = Array.from(new Set(featuredNames.map((name) => canonicalizeDisplayName(name)))).filter(Boolean);
+    return { cleanSong, featuredArtists: dedupedFeatured };
   };
 
   const tryParse = (input: string): Playlist => {
@@ -3459,13 +3519,24 @@ function parsePlaylistResponse(text: string): Playlist {
       }
 
       const row = track as { artist?: unknown; song?: unknown; reason?: unknown };
-      const artist = typeof row.artist === 'string' ? sanitizeGeneratedArtistName(row.artist) : '';
-      const song = typeof row.song === 'string' ? sanitizeGeneratedSongTitle(row.song) : '';
+      const artistRow = typeof row.artist === 'string' ? normalizeGeneratedArtistEntry(row.artist) : { mainArtist: '', featuredArtists: [], displayArtist: '' };
+      const songRow = typeof row.song === 'string' ? extractFeaturedArtistsFromSongTitle(row.song) : { cleanSong: '', featuredArtists: [] };
+      const artist = artistRow.mainArtist;
+      const song = songRow.cleanSong;
       const reason = typeof row.reason === 'string' ? row.reason.trim() : '';
+      const featuredArtists = Array.from(new Set([...artistRow.featuredArtists, ...songRow.featuredArtists]))
+        .map((name) => canonicalizeDisplayName(name))
+        .filter((name) => name.length > 0 && normalize(name) !== normalize(artist));
 
       (track as { artist: string }).artist = artist;
       (track as { song: string }).song = song;
       (track as { reason: string }).reason = reason;
+      if (artistRow.displayArtist && normalize(artistRow.displayArtist) !== normalize(artist)) {
+        (track as { artist_display?: string }).artist_display = artistRow.displayArtist;
+      }
+      if (featuredArtists.length > 0) {
+        (track as { featured_artists?: string[] }).featured_artists = featuredArtists;
+      }
 
       if (!artist || !song || !reason) {
         throw new Error('Invalid track format: missing required fields');

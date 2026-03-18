@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
 import { searchTrackByIsrc, searchTrackCandidates, searchTrackCandidatesByIsrc, searchTrackWithDiagnostics } from './services/spotify.js';
-import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUrl, updatePlaylistTrackSpotifyUrls } from './services/db.js';
+import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUri, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUri, setRecordingSpotifyUrl, updatePlaylistTrackSpotifyUrls } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
 import { resolveMusicBrainzRecordingMetadata } from './services/musicbrainz.js';
 import { backfillTruthCreditsFromDiscogs } from './services/truth-credit-layer.js';
@@ -681,7 +681,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     }
 
     const storedSpotifyUrl = getRecordingSpotifyUrl(track.artist, track.song);
-    const storedUri = storedSpotifyUrl ? spotifyUrlToUri(storedSpotifyUrl) : null;
+    const storedSpotifyUri = getRecordingSpotifyUri(track.artist, track.song);
+    const storedUri = storedSpotifyUri || (storedSpotifyUrl ? spotifyUrlToUri(storedSpotifyUrl) : null);
     if (storedUri && usedUris.has(storedUri)) {
       skipReason = 'cached_uri_already_used';
     }
@@ -689,8 +690,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       uris.push(storedUri);
       usedUris.add(storedUri);
       reusedRecordingSpotifyUrls += 1;
-      if (storedSpotifyUrl) {
-        playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: storedSpotifyUrl });
+      const cachedUrl = storedSpotifyUrl || spotifyUriToUrl(storedUri);
+      if (cachedUrl) {
+        playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: cachedUrl });
       }
       matchedCurrentTrack = true;
       matchedTrackCount += 1;
@@ -738,6 +740,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           usedUris.add(uri);
           matchedViaIsrc += 1;
           setRecordingSpotifyUrl(track.artist, track.song, candidateUrl);
+          setRecordingSpotifyUri(track.artist, track.song, uri);
           playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: candidateUrl });
           if (typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms) && candidate.duration_ms > 0) {
             setRecordingDurationMs(track.artist, track.song, candidate.duration_ms);
@@ -766,6 +769,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             usedUris.add(uri);
             matchedViaIsrc += 1;
             setRecordingSpotifyUrl(track.artist, track.song, spotifyUrl);
+            setRecordingSpotifyUri(track.artist, track.song, uri);
             playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl });
             if (typeof spotifyByIsrc.duration_ms === 'number' && Number.isFinite(spotifyByIsrc.duration_ms) && spotifyByIsrc.duration_ms > 0) {
               setRecordingDurationMs(track.artist, track.song, spotifyByIsrc.duration_ms);
@@ -876,6 +880,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           uncertainSearchMatches += 1;
         }
         setRecordingSpotifyUrl(track.artist, track.song, selectedUrl);
+        setRecordingSpotifyUri(track.artist, track.song, selectedUri);
         playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: selectedUrl });
         if (typeof selectedDurationMs === 'number' && Number.isFinite(selectedDurationMs) && selectedDurationMs > 0) {
           setRecordingDurationMs(track.artist, track.song, selectedDurationMs);

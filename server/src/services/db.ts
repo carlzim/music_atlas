@@ -41,6 +41,7 @@ db.exec(`
     title TEXT NOT NULL,
     canonical_key TEXT UNIQUE NOT NULL,
     isrc TEXT,
+    spotify_uri TEXT,
     spotify_url TEXT,
     duration_ms INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -220,11 +221,16 @@ if (!hasPersonCanonicalColumn) {
 
 const recordingsColumns = db.prepare('PRAGMA table_info(recordings)').all() as Array<{ name: string }>;
 const hasRecordingIsrcColumn = recordingsColumns.some((column) => column.name === 'isrc');
+const hasRecordingSpotifyUriColumn = recordingsColumns.some((column) => column.name === 'spotify_uri');
 const hasRecordingSpotifyUrlColumn = recordingsColumns.some((column) => column.name === 'spotify_url');
 const hasRecordingDurationMsColumn = recordingsColumns.some((column) => column.name === 'duration_ms');
 
 if (!hasRecordingIsrcColumn) {
   db.exec('ALTER TABLE recordings ADD COLUMN isrc TEXT');
+}
+
+if (!hasRecordingSpotifyUriColumn) {
+  db.exec('ALTER TABLE recordings ADD COLUMN spotify_uri TEXT');
 }
 
 if (!hasRecordingSpotifyUrlColumn) {
@@ -3290,6 +3296,32 @@ export function setRecordingIsrc(artist: string, title: string, isrc: string): v
   if (!recordingId) return;
 
   db.prepare('UPDATE recordings SET isrc = ? WHERE id = ?').run(normalizedIsrc, recordingId);
+}
+
+function normalizeSpotifyUri(value: string): string {
+  const match = String(value || '').trim().match(/^spotify:track:([A-Za-z0-9]+)$/);
+  if (!match) return '';
+  return `spotify:track:${match[1]}`;
+}
+
+export function getRecordingSpotifyUri(artist: string, title: string): string | null {
+  const canonicalKey = buildRecordingCanonicalKey(artist, title);
+  if (!canonicalKey) return null;
+  try {
+    const row = db.prepare('SELECT spotify_uri FROM recordings WHERE canonical_key = ? LIMIT 1').get(canonicalKey) as { spotify_uri: string | null } | undefined;
+    const value = typeof row?.spotify_uri === 'string' ? normalizeSpotifyUri(row.spotify_uri) : '';
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+export function setRecordingSpotifyUri(artist: string, title: string, spotifyUri: string): void {
+  const value = normalizeSpotifyUri(spotifyUri || '');
+  if (!value) return;
+  const recordingId = ensureRecordingId(artist, title);
+  if (!recordingId) return;
+  db.prepare('UPDATE recordings SET spotify_uri = ? WHERE id = ?').run(value, recordingId);
 }
 
 export function getRecordingSpotifyUrl(artist: string, title: string): string | null {

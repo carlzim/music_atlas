@@ -351,6 +351,7 @@ function scoreSpotifyCandidate(
   const requestedArtistKeys = getArtistMatchKeys(artist);
   const requestedTitle = normalizeTitleKey(song);
   const cleanedRequestedTitle = normalizeTitleKey(cleanSongTitle(song));
+  const normalizedRequestedSong = normalizeForMatch(song);
   const candidateTitle = normalizeTitleKey(candidate.title);
   const candidateArtists = candidate.artists.flatMap((candidateArtist) => Array.from(getArtistMatchKeys(candidateArtist)));
   const candidatePrimaryArtistKeys = candidate.artists.length > 0
@@ -452,6 +453,15 @@ function scoreSpotifyCandidate(
   if (!allowsRemixVariants) {
     const remixVariantRegex = /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/;
     if (remixVariantRegex.test(titleAndAlbum)) {
+      score -= 1;
+    }
+  }
+
+  const requestedHasVariantIntent = /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b|\bremaster(?:ed)?\b|\bacoustic\b|\bdemo\b|\binstrumental\b|\bkaraoke\b|\bversion\b/.test(normalizedRequestedSong);
+  if (!requestedHasVariantIntent) {
+    const candidateHasVariantMarker = /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b|\bremaster(?:ed)?\b|\bacoustic\b|\bdemo\b|\binstrumental\b|\bkaraoke\b|\bversion\b/.test(candidateTitle);
+    const isDirectRequestedTitleMatch = candidateTitle === requestedTitle || candidateTitle === cleanedRequestedTitle;
+    if (candidateHasVariantMarker && !isDirectRequestedTitleMatch) {
       score -= 1;
     }
   }

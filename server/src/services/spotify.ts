@@ -1,6 +1,7 @@
 import { buildArtistCanonicalKey, buildPersonCanonicalKey, canonicalizeDisplayName } from './normalize.js';
 
 export interface SpotifyTrackInfo {
+  spotify_uri?: string | null;
   spotify_url: string | null;
   album_image_url: string | null;
   release_year: number | null;
@@ -589,6 +590,7 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
   if (bestCandidate) {
     console.log(`[Spotify] Found match: "${song}" by "${artist}" (score=${bestCandidate.score})`);
     return {
+      spotify_uri: bestCandidate.spotify_uri,
       spotify_url: bestCandidate.spotify_url,
       album_image_url: bestCandidate.album_image_url,
       release_year: bestCandidate.release_year,
@@ -742,6 +744,7 @@ export async function searchTrackCandidates(
 export async function searchTrack(artist: string, song: string, promptContext = '', targetDurationMs?: number | null): Promise<SpotifyTrackInfo> {
   const result = await searchTrackInternal(artist, song, promptContext, targetDurationMs);
   return {
+    spotify_uri: result.spotify_uri ?? null,
     spotify_url: result.spotify_url,
     album_image_url: result.album_image_url,
     release_year: result.release_year,
@@ -765,6 +768,7 @@ export async function searchTrackByIsrc(isrc: string, targetDurationMs?: number 
     return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null };
   }
   return {
+    spotify_uri: best.spotify_uri ?? null,
     spotify_url: best.spotify_url,
     album_image_url: best.album_image_url,
     release_year: best.release_year,

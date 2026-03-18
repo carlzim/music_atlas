@@ -1091,6 +1091,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     let addTracksAttemptsTotal = 0;
     let addTracksChunksRetried = 0;
     let addTracksRetryDelayTotalMs = 0;
+    let addTracksRetryDelayMaxMs = 0;
     let addTracksRetryAfterRetries = 0;
     let addTracksBackoffRetries = 0;
     for (let chunkIndex = 0; chunkIndex < uriChunks.length; chunkIndex += 1) {
@@ -1158,6 +1159,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         if (isTransientChunkError && attempt < addTracksMaxAttempts) {
           addTracksChunksRetried += 1;
           addTracksRetryDelayTotalMs += retryDelayMs;
+          addTracksRetryDelayMaxMs = Math.max(addTracksRetryDelayMaxMs, retryDelayMs);
           if (usesRetryAfter) {
             addTracksRetryAfterRetries += 1;
           } else {
@@ -1204,6 +1206,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             totalAttempts: addTracksAttemptsTotal,
             retriedChunks: addTracksChunksRetried,
             retryDelayTotalMs: addTracksRetryDelayTotalMs,
+            retryDelayMaxMs: addTracksRetryDelayMaxMs,
             retryDelayAverageMs: addTracksChunksRetried > 0
               ? Math.floor(addTracksRetryDelayTotalMs / addTracksChunksRetried)
               : 0,
@@ -1253,6 +1256,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             totalAttempts: addTracksAttemptsTotal,
             retriedChunks: addTracksChunksRetried,
             retryDelayTotalMs: addTracksRetryDelayTotalMs,
+            retryDelayMaxMs: addTracksRetryDelayMaxMs,
             retryDelayAverageMs: addTracksChunksRetried > 0
               ? Math.floor(addTracksRetryDelayTotalMs / addTracksChunksRetried)
               : 0,
@@ -1297,6 +1301,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         totalAttempts: addTracksAttemptsTotal,
         retriedChunks: addTracksChunksRetried,
         retryDelayTotalMs: addTracksRetryDelayTotalMs,
+        retryDelayMaxMs: addTracksRetryDelayMaxMs,
         retryDelayAverageMs: addTracksChunksRetried > 0
           ? Math.floor(addTracksRetryDelayTotalMs / addTracksChunksRetried)
           : 0,

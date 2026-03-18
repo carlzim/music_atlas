@@ -898,7 +898,7 @@ function PlaylistPage() {
     duplicateUriMatches: number;
     uncertainMatches: number;
     uncertainTracks: Array<{ artist: string; song: string; score: number }>;
-    matchedTracksSample: Array<{ artist: string; song: string; source: string; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other' }>;
+    matchedTracksSample: Array<{ artist: string; song: string; source: string; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other'; variantBucket?: 'canonical' | 'fallback_live' | 'avoid' }>;
     skipReasonCounts: Record<string, number>;
     skippedTracks: Array<{ artist: string; song: string; reason?: string }>;
     matchSources?: {
@@ -920,6 +920,13 @@ function PlaylistPage() {
       searchPrefixArtistMatches?: number;
       searchAliasArtistMatches?: number;
       searchOtherArtistMatches?: number;
+    };
+    variantSelectionStats?: {
+      canonicalPassWins?: number;
+      liveFallbackWins?: number;
+      avoidFallbackWins?: number;
+      soundtrackRejectedCount?: number;
+      remixRejectedCount?: number;
     };
     searchScoreBands?: {
       strong?: number;
@@ -1067,7 +1074,7 @@ function PlaylistPage() {
         : [],
       matchedTracksSample: Array.isArray(payload.matchedTracksSample)
         ? payload.matchedTracksSample
-            .filter((item: unknown): item is { artist: string; song: string; source: string; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other' } => {
+            .filter((item: unknown): item is { artist: string; song: string; source: string; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other'; variantBucket?: 'canonical' | 'fallback_live' | 'avoid' } => {
               return Boolean(
                 item
                   && typeof item === 'object'
@@ -1083,6 +1090,11 @@ function PlaylistPage() {
                 || (item as { artistMatchMode?: unknown }).artistMatchMode === 'alias'
                 || (item as { artistMatchMode?: unknown }).artistMatchMode === 'other'
                 ? (item as { artistMatchMode: 'exact' | 'prefix' | 'alias' | 'other' }).artistMatchMode
+                : undefined,
+              variantBucket: (item as { variantBucket?: unknown }).variantBucket === 'canonical'
+                || (item as { variantBucket?: unknown }).variantBucket === 'fallback_live'
+                || (item as { variantBucket?: unknown }).variantBucket === 'avoid'
+                ? (item as { variantBucket: 'canonical' | 'fallback_live' | 'avoid' }).variantBucket
                 : undefined,
             }))
             .slice(0, 20)
@@ -1131,6 +1143,15 @@ function PlaylistPage() {
             searchPrefixArtistMatches?: number;
             searchAliasArtistMatches?: number;
             searchOtherArtistMatches?: number;
+          }
+        : undefined,
+      variantSelectionStats: payload.variantSelectionStats && typeof payload.variantSelectionStats === 'object'
+        ? payload.variantSelectionStats as {
+            canonicalPassWins?: number;
+            liveFallbackWins?: number;
+            avoidFallbackWins?: number;
+            soundtrackRejectedCount?: number;
+            remixRejectedCount?: number;
           }
         : undefined,
       searchScoreBands: payload.searchScoreBands && typeof payload.searchScoreBands === 'object'
@@ -1470,6 +1491,15 @@ function PlaylistPage() {
                 {' '}search other {spotifyMatchDetails.artistNormalizationStats.searchOtherArtistMatches ?? 0}
               </p>
             )}
+            {spotifyMatchDetails.variantSelectionStats && (
+              <p>
+                Variant selection: canonical wins {spotifyMatchDetails.variantSelectionStats.canonicalPassWins ?? 0},
+                {' '}live fallback wins {spotifyMatchDetails.variantSelectionStats.liveFallbackWins ?? 0},
+                {' '}avoid fallback wins {spotifyMatchDetails.variantSelectionStats.avoidFallbackWins ?? 0},
+                {' '}soundtrack rejected {spotifyMatchDetails.variantSelectionStats.soundtrackRejectedCount ?? 0},
+                {' '}remix rejected {spotifyMatchDetails.variantSelectionStats.remixRejectedCount ?? 0}
+              </p>
+            )}
             {spotifyMatchDetails.searchScoreBands && (
               <p>
                 Search score bands: strong {spotifyMatchDetails.searchScoreBands.strong ?? 0},
@@ -1535,7 +1565,8 @@ function PlaylistPage() {
                     <li key={`${track.artist}-${track.song}-matched-${idx}`} className="playlist-item">
                       {track.song} - {track.artist} ({track.source.replace(/_/g, ' ')}
                       {typeof track.score === 'number' && Number.isFinite(track.score) ? `, score ${track.score}` : ''}
-                      {track.artistMatchMode ? `, artist match ${track.artistMatchMode}` : ''})
+                      {track.artistMatchMode ? `, artist match ${track.artistMatchMode}` : ''}
+                      {track.variantBucket ? `, variant ${track.variantBucket.replace(/_/g, ' ')}` : ''})
                     </li>
                   ))}
                 </ul>

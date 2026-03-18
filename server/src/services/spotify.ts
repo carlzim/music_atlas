@@ -12,6 +12,10 @@ export interface SpotifyTrackCandidateInfo extends SpotifyTrackInfo {
   spotify_uri?: string | null;
   score?: number | null;
   artist_match_mode?: 'exact' | 'prefix' | 'alias' | 'other';
+  variant_bucket?: VariantSelectionBucket;
+  soundtrack_variant?: boolean;
+  remix_variant?: boolean;
+  live_variant?: boolean;
 }
 
 export interface SpotifyTrackDebugInfo extends SpotifyTrackInfo {
@@ -19,6 +23,10 @@ export interface SpotifyTrackDebugInfo extends SpotifyTrackInfo {
   matchedTitle: string | null;
   matchedAlbumTitle: string | null;
   artist_match_mode?: 'exact' | 'prefix' | 'alias' | 'other';
+  variant_bucket?: VariantSelectionBucket;
+  soundtrack_variant?: boolean;
+  remix_variant?: boolean;
+  live_variant?: boolean;
 }
 
 interface SpotifyCandidate {
@@ -42,6 +50,10 @@ interface SpotifySearchResult {
 interface RankedSpotifyCandidate extends SpotifyCandidate {
   score: number;
   artist_match_mode: 'exact' | 'prefix' | 'alias' | 'other';
+  variant_bucket: VariantSelectionBucket;
+  soundtrack_variant: boolean;
+  remix_variant: boolean;
+  live_variant: boolean;
 }
 
 type VariantSelectionBucket = 'canonical' | 'fallback_live' | 'avoid';
@@ -447,8 +459,24 @@ function isLiveOrVenuePrompt(promptContext: string): boolean {
   return /\blive\b|\bvenue\b|\bconcert\b|\bperformance\b|\bshow\b|\btour\b|\bhollywood bowl\b|\bcbgb\b|\bhall\b|\barena\b|\btheatre\b|\btheater\b/.test(text);
 }
 
+function getVariantSignals(candidate: Pick<SpotifyCandidate, 'title' | 'album_title'>): {
+  soundtrack: boolean;
+  remix: boolean;
+  live: boolean;
+} {
+  const titleAndAlbum = normalizeForMatch(`${candidate.title || ''} ${candidate.album_title || ''}`);
+  if (!titleAndAlbum) {
+    return { soundtrack: false, remix: false, live: false };
+  }
+  return {
+    soundtrack: /\bsoundtrack\b|\bost\b|\boriginal\s+motion\s+picture\b|\bmotion\s+picture\b|\boriginal\s+score\b|\bfilm\s+version\b|\bfrom\s+the\s+.*soundtrack\b|\bmusic\s+from\b/.test(titleAndAlbum),
+    remix: /\bremix(?:es)?\b|\brework\b|\bmashup\b|\bflip\b/.test(titleAndAlbum),
+    live: /\blive\b|\bin\s+concert\b|\blive\s+at\b|\blive\s+in\b/.test(titleAndAlbum),
+  };
+}
+
 function classifyVariantSelectionBucket(
-  candidate: Pick<SpotifyCandidate, 'title' | 'album_title'>,
+  variantSignals: { soundtrack: boolean; remix: boolean; live: boolean },
   options: {
     livePrompt: boolean;
     explicitVenue: string | null;
@@ -456,20 +484,13 @@ function classifyVariantSelectionBucket(
     allowsSoundtrackVariants: boolean;
   }
 ): VariantSelectionBucket {
-  const titleAndAlbum = normalizeForMatch(`${candidate.title || ''} ${candidate.album_title || ''}`);
-  if (!titleAndAlbum) return 'canonical';
-
-  const isSoundtrackVariant = /\bsoundtrack\b|\bost\b|\boriginal\s+motion\s+picture\b|\bmotion\s+picture\b|\boriginal\s+score\b|\bfilm\s+version\b|\bfrom\s+the\s+.*soundtrack\b|\bmusic\s+from\b/.test(titleAndAlbum);
-  const isRemixVariant = /\bremix(?:es)?\b|\brework\b|\bmashup\b|\bflip\b/.test(titleAndAlbum);
-  const isLiveVariant = /\blive\b|\bin\s+concert\b|\blive\s+at\b|\blive\s+in\b/.test(titleAndAlbum);
-
-  if (isSoundtrackVariant && !options.allowsSoundtrackVariants) {
+  if (variantSignals.soundtrack && !options.allowsSoundtrackVariants) {
     return 'avoid';
   }
-  if (isRemixVariant && !options.allowsRemixVariants) {
+  if (variantSignals.remix && !options.allowsRemixVariants) {
     return 'avoid';
   }
-  if (isLiveVariant && !options.livePrompt && !options.explicitVenue) {
+  if (variantSignals.live && !options.livePrompt && !options.explicitVenue) {
     return 'fallback_live';
   }
 
@@ -849,13 +870,13 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
   
   if (!token) {
     console.log('[Spotify] No token - skipping search');
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
+    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined, variant_bucket: undefined, soundtrack_variant: false, remix_variant: false, live_variant: false };
   }
 
   const explicitVenue = extractExplicitVenue(promptContext);
   const artistCacheKey = getArtistCacheKey(artist, song, promptContext);
   if (!artistCacheKey) {
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
+    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined, variant_bucket: undefined, soundtrack_variant: false, remix_variant: false, live_variant: false };
   }
 
   let cacheEntry = artistSearchCache.get(artistCacheKey);
@@ -978,13 +999,13 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
       artistSearchCache.set(artistCacheKey, cacheEntry);
     } catch (e) {
       console.error('[Spotify] Artist search error:', e);
-      return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
+      return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined, variant_bucket: undefined, soundtrack_variant: false, remix_variant: false, live_variant: false };
     }
   }
 
   if (!cacheEntry || cacheEntry.rateLimitedAbort) {
     console.warn('[Spotify] Skipping match due to prior rate limit for this artist');
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
+    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined, variant_bucket: undefined, soundtrack_variant: false, remix_variant: false, live_variant: false };
   }
 
   const rankedCandidates = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue, targetDurationMs);
@@ -1002,11 +1023,15 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
       matchedTitle: bestCandidate.title || null,
       matchedAlbumTitle: bestCandidate.album_title || null,
       artist_match_mode: bestCandidate.artist_match_mode,
+      variant_bucket: bestCandidate.variant_bucket,
+      soundtrack_variant: bestCandidate.soundtrack_variant,
+      remix_variant: bestCandidate.remix_variant,
+      live_variant: bestCandidate.live_variant,
     };
   }
 
   console.log('[Spotify] No match found');
-  return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
+  return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined, variant_bucket: undefined, soundtrack_variant: false, remix_variant: false, live_variant: false };
 }
 
 function rankSpotifyCandidates(
@@ -1048,6 +1073,13 @@ function rankSpotifyCandidates(
     const artistMatchMode: 'exact' | 'prefix' | 'alias' | 'other' = hasPrimaryArtistMatch
       ? 'exact'
       : (hasLoosePrimaryPrefixMatch ? 'prefix' : (hasAliasArtistMatch ? 'alias' : 'other'));
+    const variantSignals = getVariantSignals(candidate);
+    const variantBucket = classifyVariantSelectionBucket(variantSignals, {
+      livePrompt,
+      explicitVenue,
+      allowsRemixVariants,
+      allowsSoundtrackVariants,
+    });
     const score = scoreSpotifyCandidate(
       artist,
       song,
@@ -1062,7 +1094,15 @@ function rankSpotifyCandidates(
       allowsSoundtrackVariants,
       targetDurationMs
     );
-    ranked.push({ ...candidate, score, artist_match_mode: artistMatchMode });
+    ranked.push({
+      ...candidate,
+      score,
+      artist_match_mode: artistMatchMode,
+      variant_bucket: variantBucket,
+      soundtrack_variant: variantSignals.soundtrack,
+      remix_variant: variantSignals.remix,
+      live_variant: variantSignals.live,
+    });
   }
 
   ranked.sort((a, b) => {
@@ -1085,15 +1125,9 @@ function rankSpotifyCandidates(
   const avoid: RankedSpotifyCandidate[] = [];
 
   for (const candidate of ranked) {
-    const bucket = classifyVariantSelectionBucket(candidate, {
-      livePrompt,
-      explicitVenue,
-      allowsRemixVariants,
-      allowsSoundtrackVariants,
-    });
-    if (bucket === 'canonical') {
+    if (candidate.variant_bucket === 'canonical') {
       canonical.push(candidate);
-    } else if (bucket === 'fallback_live') {
+    } else if (candidate.variant_bucket === 'fallback_live') {
       fallbackLive.push(candidate);
     } else {
       avoid.push(candidate);
@@ -1273,6 +1307,10 @@ export async function searchTrackCandidates(
       duration_ms: item.duration_ms,
       score: item.score,
       artist_match_mode: item.artist_match_mode,
+      variant_bucket: item.variant_bucket,
+      soundtrack_variant: item.soundtrack_variant,
+      remix_variant: item.remix_variant,
+      live_variant: item.live_variant,
     });
   }
 

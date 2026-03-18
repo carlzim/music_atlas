@@ -135,8 +135,27 @@ function normalizeForMatch(value: string): string {
     .trim();
 }
 
+function normalizeRomanNumeralToken(token: string): string {
+  switch (token.toLowerCase()) {
+    case 'i': return '1';
+    case 'ii': return '2';
+    case 'iii': return '3';
+    case 'iv': return '4';
+    case 'v': return '5';
+    case 'vi': return '6';
+    case 'vii': return '7';
+    case 'viii': return '8';
+    case 'ix': return '9';
+    case 'x': return '10';
+    default: return token;
+  }
+}
+
 function normalizeTitleKey(value: string): string {
   return normalizeForMatch(canonicalizeDisplayName(value))
+    .replace(/\b(part|pt)\.?\s+([ivx]+|\d+)\b/g, (_, prefix: string, numberToken: string) => {
+      return `${prefix} ${normalizeRomanNumeralToken(numberToken)}`;
+    })
     .replace(/[’']/g, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -147,21 +166,7 @@ function normalizeLooseTitleTokens(value: string): string[] {
     .toLowerCase()
     .replace(/[’']/g, '')
     .replace(/\b(part|pt)\.?\s+([ivx]+|\d+)\b/g, '$1 $2')
-    .replace(/\b([ivx]+)\b/g, (token) => {
-      switch (token) {
-        case 'i': return '1';
-        case 'ii': return '2';
-        case 'iii': return '3';
-        case 'iv': return '4';
-        case 'v': return '5';
-        case 'vi': return '6';
-        case 'vii': return '7';
-        case 'viii': return '8';
-        case 'ix': return '9';
-        case 'x': return '10';
-        default: return token;
-      }
-    })
+    .replace(/\b([ivx]+)\b/g, (token) => normalizeRomanNumeralToken(token))
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/g)
     .map((token) => token.trim())
@@ -173,6 +178,13 @@ function hasLooseTitleTokenMatch(baseTitle: string, candidateTitle: string): boo
   if (!baseTitle || !candidateTitle) return false;
   const baseTokens = normalizeLooseTitleTokens(baseTitle);
   const candidateTokens = normalizeLooseTitleTokens(candidateTitle);
+  if (baseTokens.length === 1 && candidateTokens.length === 1) {
+    const left = baseTokens[0];
+    const right = candidateTokens[0];
+    if (left === right && (/^\d+$/.test(left) || left.length >= 4)) {
+      return true;
+    }
+  }
   if (baseTokens.length < 2 || candidateTokens.length < 2) return false;
   const baseSet = new Set(baseTokens);
   const candidateSet = new Set(candidateTokens);

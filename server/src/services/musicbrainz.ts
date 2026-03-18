@@ -345,16 +345,21 @@ function normalizeIsrc(value: string): string {
   return value.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-export async function resolveMusicBrainzRecordingIsrc(artist: string, title: string): Promise<string | null> {
+export interface MusicBrainzRecordingMetadata {
+  isrc: string | null;
+  durationMs: number | null;
+}
+
+export async function resolveMusicBrainzRecordingMetadata(artist: string, title: string): Promise<MusicBrainzRecordingMetadata> {
   const artistValue = artist.trim();
   const titleValue = title.trim();
-  if (!artistValue || !titleValue) return null;
+  if (!artistValue || !titleValue) return { isrc: null, durationMs: null };
 
   const query = `recording:"${titleValue}" AND artist:"${artistValue}"`;
   const searchUrl = `${MUSICBRAINZ_BASE_URL}/recording/?query=${encodeURIComponent(query)}&fmt=json&limit=5`;
   const searchRaw = await rateLimitedFetchJson(searchUrl) as { recordings?: unknown[] };
   const recordings = Array.isArray(searchRaw.recordings) ? searchRaw.recordings : [];
-  if (recordings.length === 0) return null;
+  if (recordings.length === 0) return { isrc: null, durationMs: null };
 
   const targetArtist = normalizeRecordingMatchValue(artistValue);
   const targetTitle = normalizeRecordingMatchValue(titleValue);
@@ -400,20 +405,30 @@ export async function resolveMusicBrainzRecordingIsrc(artist: string, title: str
   for (const item of ranked.slice(0, 3)) {
     try {
       const recordingUrl = `${MUSICBRAINZ_BASE_URL}/recording/${encodeURIComponent(item.id)}?inc=isrcs&fmt=json`;
-      const raw = await rateLimitedFetchJson(recordingUrl) as { isrcs?: unknown[] };
+      const raw = await rateLimitedFetchJson(recordingUrl) as { isrcs?: unknown[]; length?: unknown };
       const isrcs = Array.isArray(raw.isrcs)
         ? raw.isrcs
             .filter((value): value is string => typeof value === 'string')
             .map((value) => normalizeIsrc(value))
             .filter((value) => value.length >= 12)
         : [];
-      if (isrcs.length > 0) return isrcs[0];
+      const durationMs = typeof raw.length === 'number' && Number.isFinite(raw.length)
+        ? Math.max(0, Math.floor(raw.length))
+        : null;
+      if (isrcs.length > 0 || durationMs) {
+        return { isrc: isrcs[0] || null, durationMs };
+      }
     } catch {
       // best-effort
     }
   }
 
-  return null;
+  return { isrc: null, durationMs: null };
+}
+
+export async function resolveMusicBrainzRecordingIsrc(artist: string, title: string): Promise<string | null> {
+  const metadata = await resolveMusicBrainzRecordingMetadata(artist, title);
+  return metadata.isrc;
 }
 
 export async function fetchMusicBrainzGroupMembers(

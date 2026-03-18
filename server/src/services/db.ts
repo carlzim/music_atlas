@@ -1277,8 +1277,8 @@ export function updatePlaylistTrackSpotifyUrls(
   for (const item of updates) {
     const artist = canonicalizeDisplayName(item.artist || '');
     const title = String(item.song || '').trim();
-    const spotifyUrl = String(item.spotifyUrl || '').trim();
-    const spotifyUri = normalizeSpotifyUri(item.spotifyUri || '');
+    const spotifyUrl = normalizeSpotifyUrl(item.spotifyUrl || '');
+    const spotifyUri = normalizeSpotifyUri(item.spotifyUri || '') || spotifyUriFromUrl(spotifyUrl);
     const key = buildRecordingCanonicalKey(artist, title);
     if (!key || (!spotifyUrl && !spotifyUri)) continue;
     linksByRecordingKey.set(key, { spotifyUrl, spotifyUri });
@@ -3312,12 +3312,33 @@ function normalizeSpotifyUri(value: string): string {
   return `spotify:track:${match[1]}`;
 }
 
+function normalizeSpotifyUrl(value: string): string {
+  return String(value || '').trim();
+}
+
+function spotifyTrackIdFromUrl(value: string): string {
+  const match = String(value || '').trim().match(/spotify\.com\/track\/([A-Za-z0-9]+)/i);
+  return match?.[1] || '';
+}
+
+function spotifyUriFromUrl(value: string): string {
+  const trackId = spotifyTrackIdFromUrl(value);
+  if (!trackId) return '';
+  return `spotify:track:${trackId}`;
+}
+
 export function getRecordingSpotifyUri(artist: string, title: string): string | null {
   const canonicalKey = buildRecordingCanonicalKey(artist, title);
   if (!canonicalKey) return null;
   try {
-    const row = db.prepare('SELECT spotify_uri FROM recordings WHERE canonical_key = ? LIMIT 1').get(canonicalKey) as { spotify_uri: string | null } | undefined;
+    const row = db.prepare('SELECT spotify_uri, spotify_url FROM recordings WHERE canonical_key = ? LIMIT 1').get(canonicalKey) as {
+      spotify_uri: string | null;
+      spotify_url: string | null;
+    } | undefined;
     const value = typeof row?.spotify_uri === 'string' ? normalizeSpotifyUri(row.spotify_uri) : '';
+    if (value) return value;
+    const fromUrl = typeof row?.spotify_url === 'string' ? spotifyUriFromUrl(row.spotify_url) : '';
+    if (fromUrl) return fromUrl;
     return value || null;
   } catch {
     return null;
@@ -3345,11 +3366,16 @@ export function getRecordingSpotifyUrl(artist: string, title: string): string | 
 }
 
 export function setRecordingSpotifyUrl(artist: string, title: string, spotifyUrl: string): void {
-  const value = String(spotifyUrl || '').trim();
+  const value = normalizeSpotifyUrl(spotifyUrl || '');
   if (!value) return;
   const recordingId = ensureRecordingId(artist, title);
   if (!recordingId) return;
-  db.prepare('UPDATE recordings SET spotify_url = ? WHERE id = ?').run(value, recordingId);
+  const derivedUri = spotifyUriFromUrl(value);
+  if (derivedUri) {
+    db.prepare('UPDATE recordings SET spotify_url = ?, spotify_uri = ? WHERE id = ?').run(value, derivedUri, recordingId);
+  } else {
+    db.prepare('UPDATE recordings SET spotify_url = ? WHERE id = ?').run(value, recordingId);
+  }
 }
 
 export function getRecordingDurationMs(artist: string, title: string): number | null {

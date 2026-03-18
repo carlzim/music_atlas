@@ -693,7 +693,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   const uris: string[] = [];
   const usedUris = new Set<string>();
   const playlistTrackSpotifyUpdates: Array<{ artist: string; song: string; spotifyUrl?: string; spotifyUri?: string }> = [];
-  const matchedTracks: Array<{ artist: string; song: string; source: 'track_link' | 'recording_cache' | 'isrc' | 'search'; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other' }> = [];
+  const matchedTracks: Array<{ artist: string; song: string; source: 'track_link' | 'recording_cache' | 'isrc' | 'search'; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other'; variantBucket?: 'canonical' | 'fallback_live' | 'avoid' }> = [];
   const metadataLookupCache = new Map<string, { isrc: string | null; durationMs: number | null }>();
   const isrcCandidateCache = new Map<string, Array<{ spotify_url: string | null; spotify_uri?: string | null; duration_ms?: number | null }>>();
   let matchedTrackCount = 0;
@@ -725,6 +725,22 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     searchPrefixArtistMatches: 0,
     searchAliasArtistMatches: 0,
     searchOtherArtistMatches: 0,
+  };
+  const variantSelectionStats = {
+    canonicalPassWins: 0,
+    liveFallbackWins: 0,
+    avoidFallbackWins: 0,
+    soundtrackRejectedCount: 0,
+    remixRejectedCount: 0,
+  };
+  const registerCandidateVariantRejection = (candidate: { variant_bucket?: unknown; soundtrack_variant?: unknown; remix_variant?: unknown }): void => {
+    if (candidate.variant_bucket !== 'avoid') return;
+    if (candidate.soundtrack_variant === true) {
+      variantSelectionStats.soundtrackRejectedCount += 1;
+    }
+    if (candidate.remix_variant === true) {
+      variantSelectionStats.remixRejectedCount += 1;
+    }
   };
   let searchScoreCount = 0;
   let searchScoreTotal = 0;
@@ -908,6 +924,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       let selectedDurationMs: number | null = null;
       let selectedScore: number | null = null;
       let selectedArtistMatchMode: 'exact' | 'prefix' | 'alias' | 'other' | null = null;
+      let selectedVariantBucket: 'canonical' | 'fallback_live' | 'avoid' | null = null;
       const displayArtist = typeof track.artist_display === 'string' ? track.artist_display.trim() : '';
       const canTryDisplayArtistFallback = displayArtist.length > 0 && displayArtist !== track.artist;
       const featuredArtists = Array.isArray(track.featured_artists)
@@ -933,6 +950,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       let displayFallbackTried = false;
 
       for (const candidate of candidates) {
+        registerCandidateVariantRejection(candidate);
         const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
           ? candidate.spotify_uri.trim()
           : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
@@ -954,12 +972,16 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
           ? candidate.artist_match_mode
           : null;
+        selectedVariantBucket = candidate.variant_bucket === 'canonical' || candidate.variant_bucket === 'fallback_live' || candidate.variant_bucket === 'avoid'
+          ? candidate.variant_bucket
+          : null;
         break;
       }
 
       if (!selectedUrl && candidates.length > 0 && candidateUriCollisionCount >= candidates.length) {
         const extendedCandidates = await searchTrackCandidates(track.artist, track.song, playlist.prompt, 20, recordingDurationMs);
         for (const candidate of extendedCandidates) {
+          registerCandidateVariantRejection(candidate);
           const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
             ? candidate.spotify_uri.trim()
             : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
@@ -981,6 +1003,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
             ? candidate.artist_match_mode
             : null;
+          selectedVariantBucket = candidate.variant_bucket === 'canonical' || candidate.variant_bucket === 'fallback_live' || candidate.variant_bucket === 'avoid'
+            ? candidate.variant_bucket
+            : null;
           break;
         }
       }
@@ -995,6 +1020,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           const featuredCandidates = await searchTrackCandidates(featuredFallbackArtist, track.song, playlist.prompt, 6, recordingDurationMs);
           featuredCandidateCountTotal += featuredCandidates.length;
           for (const candidate of featuredCandidates) {
+            registerCandidateVariantRejection(candidate);
             const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
               ? candidate.spotify_uri.trim()
               : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
@@ -1016,6 +1042,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
               ? candidate.artist_match_mode
               : null;
+            selectedVariantBucket = candidate.variant_bucket === 'canonical' || candidate.variant_bucket === 'fallback_live' || candidate.variant_bucket === 'avoid'
+              ? candidate.variant_bucket
+              : null;
             artistNormalizationStats.featuredArtistFallbackMatches += 1;
             break;
           }
@@ -1034,6 +1063,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         const displayCandidates = await searchTrackCandidates(displayArtist, track.song, playlist.prompt, 6, recordingDurationMs);
         let displayCandidateCollisionCount = 0;
         for (const candidate of displayCandidates) {
+          registerCandidateVariantRejection(candidate);
           const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
             ? candidate.spotify_uri.trim()
             : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
@@ -1054,6 +1084,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             : null;
           selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
             ? candidate.artist_match_mode
+            : null;
+          selectedVariantBucket = candidate.variant_bucket === 'canonical' || candidate.variant_bucket === 'fallback_live' || candidate.variant_bucket === 'avoid'
+            ? candidate.variant_bucket
             : null;
           artistNormalizationStats.displayArtistFallbackMatches += 1;
           break;
@@ -1099,6 +1132,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
               selectedArtistMatchMode = spotifyInfo.artist_match_mode === 'exact' || spotifyInfo.artist_match_mode === 'prefix' || spotifyInfo.artist_match_mode === 'alias' || spotifyInfo.artist_match_mode === 'other'
                 ? spotifyInfo.artist_match_mode
                 : null;
+              selectedVariantBucket = spotifyInfo.variant_bucket === 'canonical' || spotifyInfo.variant_bucket === 'fallback_live' || spotifyInfo.variant_bucket === 'avoid'
+                ? spotifyInfo.variant_bucket
+                : null;
               artistNormalizationStats.featuredArtistDiagnosticFallbackMatches += 1;
               break;
             }
@@ -1129,6 +1165,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             selectedArtistMatchMode = spotifyInfo.artist_match_mode === 'exact' || spotifyInfo.artist_match_mode === 'prefix' || spotifyInfo.artist_match_mode === 'alias' || spotifyInfo.artist_match_mode === 'other'
               ? spotifyInfo.artist_match_mode
               : null;
+            selectedVariantBucket = spotifyInfo.variant_bucket === 'canonical' || spotifyInfo.variant_bucket === 'fallback_live' || spotifyInfo.variant_bucket === 'avoid'
+              ? spotifyInfo.variant_bucket
+              : null;
           } else if (fallbackUri && usedUris.has(fallbackUri)) {
             skipReason = 'fallback_uri_collision';
           }
@@ -1158,6 +1197,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             selectedArtistMatchMode = spotifyInfo.artist_match_mode === 'exact' || spotifyInfo.artist_match_mode === 'prefix' || spotifyInfo.artist_match_mode === 'alias' || spotifyInfo.artist_match_mode === 'other'
               ? spotifyInfo.artist_match_mode
               : null;
+            selectedVariantBucket = spotifyInfo.variant_bucket === 'canonical' || spotifyInfo.variant_bucket === 'fallback_live' || spotifyInfo.variant_bucket === 'avoid'
+              ? spotifyInfo.variant_bucket
+              : null;
             artistNormalizationStats.displayArtistFallbackMatches += 1;
           } else if (fallbackUri && usedUris.has(fallbackUri)) {
             skipReason = 'fallback_display_uri_collision';
@@ -1181,7 +1223,21 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         } else if (selectedArtistMatchMode === 'other') {
           artistNormalizationStats.searchOtherArtistMatches += 1;
         }
-        matchedTracks.push({ artist: track.artist, song: track.song, source: 'search', score: selectedScore, artistMatchMode: selectedArtistMatchMode || undefined });
+        if (selectedVariantBucket === 'canonical') {
+          variantSelectionStats.canonicalPassWins += 1;
+        } else if (selectedVariantBucket === 'fallback_live') {
+          variantSelectionStats.liveFallbackWins += 1;
+        } else if (selectedVariantBucket === 'avoid') {
+          variantSelectionStats.avoidFallbackWins += 1;
+        }
+        matchedTracks.push({
+          artist: track.artist,
+          song: track.song,
+          source: 'search',
+          score: selectedScore,
+          artistMatchMode: selectedArtistMatchMode || undefined,
+          variantBucket: selectedVariantBucket || undefined,
+        });
         if (typeof selectedScore === 'number' && selectedScore <= 0) {
           uncertainSearchMatches += 1;
           uncertainTracks.push({
@@ -1232,6 +1288,11 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   console.log('[spotify-save] matched via isrc:', matchedViaIsrc);
   console.log('[spotify-save] discovered isrc count:', discoveredIsrcCount);
   console.log('[spotify-save] searched spotify matches:', searchedSpotifyMatches);
+  console.log('[spotify-save] canonical selection wins:', variantSelectionStats.canonicalPassWins);
+  console.log('[spotify-save] live fallback selection wins:', variantSelectionStats.liveFallbackWins);
+  console.log('[spotify-save] avoid fallback selection wins:', variantSelectionStats.avoidFallbackWins);
+  console.log('[spotify-save] soundtrack candidates rejected:', variantSelectionStats.soundtrackRejectedCount);
+  console.log('[spotify-save] remix candidates rejected:', variantSelectionStats.remixRejectedCount);
   console.log('[spotify-save] featured-artist fallback attempts:', artistNormalizationStats.featuredArtistFallbackAttempts);
   console.log('[spotify-save] featured-artist fallback matches:', artistNormalizationStats.featuredArtistFallbackMatches);
   console.log('[spotify-save] featured diagnostic fallback attempts:', artistNormalizationStats.featuredArtistDiagnosticFallbackAttempts);
@@ -1260,6 +1321,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         search: searchedSpotifyMatches,
       },
       artistNormalizationStats,
+      variantSelectionStats,
       searchScoreBands,
       searchScoreSummary: {
         scoredCount: searchScoreCount,
@@ -1454,6 +1516,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             search: searchedSpotifyMatches,
           },
           artistNormalizationStats,
+          variantSelectionStats,
           searchScoreBands,
           searchScoreSummary: {
             scoredCount: searchScoreCount,
@@ -1512,6 +1575,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             search: searchedSpotifyMatches,
           },
           artistNormalizationStats,
+          variantSelectionStats,
           searchScoreBands,
           searchScoreSummary: {
             scoredCount: searchScoreCount,
@@ -1565,6 +1629,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         search: searchedSpotifyMatches,
       },
       artistNormalizationStats,
+      variantSelectionStats,
       searchScoreBands,
       searchScoreSummary: {
         scoredCount: searchScoreCount,

@@ -912,6 +912,7 @@ function PlaylistPage() {
       totalAttempts?: number;
       retriedChunks?: number;
       requestTimeoutMs?: number;
+      maxAttempts?: number;
     };
   } | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
@@ -1066,7 +1067,7 @@ function PlaylistPage() {
         ? payload.matchSources as { trackSpotifyUrl?: number; recordingSpotifyUrl?: number; isrc?: number; search?: number }
         : undefined,
       addTracksChunkStats: payload.addTracksChunkStats && typeof payload.addTracksChunkStats === 'object'
-        ? payload.addTracksChunkStats as { totalChunks?: number; totalAttempts?: number; retriedChunks?: number; requestTimeoutMs?: number }
+        ? payload.addTracksChunkStats as { totalChunks?: number; totalAttempts?: number; retriedChunks?: number; requestTimeoutMs?: number; maxAttempts?: number }
         : undefined,
     };
   };
@@ -1283,7 +1284,8 @@ function PlaylistPage() {
                 Spotify add-tracks chunks: {spotifyMatchDetails.addTracksChunkStats.totalChunks ?? 0},
                 {' '}attempts: {spotifyMatchDetails.addTracksChunkStats.totalAttempts ?? 0},
                 {' '}retries: {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0},
-                {' '}request timeout: {spotifyMatchDetails.addTracksChunkStats.requestTimeoutMs ?? 0}ms
+                {' '}request timeout: {spotifyMatchDetails.addTracksChunkStats.requestTimeoutMs ?? 0}ms,
+                {' '}max attempts: {spotifyMatchDetails.addTracksChunkStats.maxAttempts ?? 0}
               </p>
             )}
             {spotifyMatchDetails.matchedTracksSample.length > 0 && (

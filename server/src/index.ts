@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
-import { searchTrackByIsrc, searchTrackCandidates, searchTrackCandidatesByIsrc, searchTrackWithDiagnostics } from './services/spotify.js';
+import { searchTrackCandidates, searchTrackCandidatesByIsrc, searchTrackWithDiagnostics } from './services/spotify.js';
 import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUri, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUri, setRecordingSpotifyUrl, updatePlaylistTrackSpotifyUrls } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
 import { resolveMusicBrainzRecordingMetadata } from './services/musicbrainz.js';
@@ -654,6 +654,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   const usedUris = new Set<string>();
   const playlistTrackSpotifyUpdates: Array<{ artist: string; song: string; spotifyUrl?: string; spotifyUri?: string }> = [];
   const metadataLookupCache = new Map<string, { isrc: string | null; durationMs: number | null }>();
+  const isrcCandidateCache = new Map<string, Array<{ spotify_url: string | null; spotify_uri?: string | null; duration_ms?: number | null }>>();
   let matchedTrackCount = 0;
   const skippedTracks: Array<{ artist: string; song: string; reason: string }> = [];
   let reusedExistingSpotifyUrls = 0;
@@ -739,7 +740,13 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
     if (recordingIsrc) {
       try {
-        const spotifyIsrcCandidates = await searchTrackCandidatesByIsrc(recordingIsrc, 6, recordingDurationMs);
+        const isrcCacheKey = `${recordingIsrc}::${recordingDurationMs || 0}`;
+        let spotifyIsrcCandidates = isrcCandidateCache.get(isrcCacheKey);
+        if (!spotifyIsrcCandidates) {
+          const fetched = await searchTrackCandidatesByIsrc(recordingIsrc, 6, recordingDurationMs);
+          spotifyIsrcCandidates = fetched;
+          isrcCandidateCache.set(isrcCacheKey, fetched);
+        }
         let isrcCollisionCount = 0;
         for (const candidate of spotifyIsrcCandidates) {
           const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
@@ -777,29 +784,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
         if (matchedCurrentTrack) continue;
 
-        const spotifyByIsrc = await searchTrackByIsrc(recordingIsrc, recordingDurationMs);
-        if (spotifyByIsrc.spotify_url || spotifyByIsrc.spotify_uri) {
-          const uri = typeof spotifyByIsrc.spotify_uri === 'string' && spotifyByIsrc.spotify_uri.trim().length > 0
-            ? spotifyByIsrc.spotify_uri.trim()
-            : (spotifyByIsrc.spotify_url ? spotifyUrlToUri(spotifyByIsrc.spotify_url) : null);
-          const spotifyUrl = spotifyByIsrc.spotify_url || (uri ? spotifyUriToUrl(uri) : null);
-          if (uri && spotifyUrl && !usedUris.has(uri)) {
-            uris.push(uri);
-            usedUris.add(uri);
-            matchedViaIsrc += 1;
-            setRecordingSpotifyUrl(track.artist, track.song, spotifyUrl);
-            setRecordingSpotifyUri(track.artist, track.song, uri);
-            playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl, spotifyUri: uri });
-            if (typeof spotifyByIsrc.duration_ms === 'number' && Number.isFinite(spotifyByIsrc.duration_ms) && spotifyByIsrc.duration_ms > 0) {
-              setRecordingDurationMs(track.artist, track.song, spotifyByIsrc.duration_ms);
-            }
-            matchedCurrentTrack = true;
-            matchedTrackCount += 1;
-            continue;
-          }
-          if (uri && usedUris.has(uri)) {
-            skipReason = 'isrc_primary_uri_collision';
-          }
+        if (skipReason === 'no_match_found' && spotifyIsrcCandidates.length === 0) {
+          skipReason = 'isrc_no_candidates';
         }
       } catch (error) {
         console.log('[spotify-save] isrc spotify lookup skipped:', { artist: track.artist, song: track.song, isrc: recordingIsrc, error: error instanceof Error ? error.message : String(error) });

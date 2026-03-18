@@ -715,6 +715,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
               setRecordingSpotifyUrl(track.artist, track.song, spotifyByIsrc.spotify_url);
               playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: spotifyByIsrc.spotify_url });
             }
+            if (typeof spotifyByIsrc.duration_ms === 'number' && Number.isFinite(spotifyByIsrc.duration_ms) && spotifyByIsrc.duration_ms > 0) {
+              setRecordingDurationMs(track.artist, track.song, spotifyByIsrc.duration_ms);
+            }
             matchedCurrentTrack = true;
             matchedTrackCount += 1;
             continue;
@@ -729,6 +732,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       const candidateUrls = await searchTrackCandidateUrls(track.artist, track.song, playlist.prompt, 6, recordingDurationMs);
       let selectedUrl: string | null = null;
       let selectedUri: string | null = null;
+      let selectedDurationMs: number | null = null;
 
       for (const candidateUrl of candidateUrls) {
         const candidateUri = spotifyUrlToUri(candidateUrl);
@@ -746,6 +750,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           if (fallbackUri && !usedUris.has(fallbackUri)) {
             selectedUrl = spotifyInfo.spotify_url;
             selectedUri = fallbackUri;
+            selectedDurationMs = typeof spotifyInfo.duration_ms === 'number' && Number.isFinite(spotifyInfo.duration_ms)
+              ? spotifyInfo.duration_ms
+              : null;
           }
         }
       }
@@ -756,6 +763,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         searchedSpotifyMatches += 1;
         setRecordingSpotifyUrl(track.artist, track.song, selectedUrl);
         playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: selectedUrl });
+        if (typeof selectedDurationMs === 'number' && Number.isFinite(selectedDurationMs) && selectedDurationMs > 0) {
+          setRecordingDurationMs(track.artist, track.song, selectedDurationMs);
+        }
         matchedCurrentTrack = true;
         matchedTrackCount += 1;
       }

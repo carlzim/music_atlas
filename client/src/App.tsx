@@ -912,6 +912,7 @@ function PlaylistPage() {
       totalAttempts?: number;
       retriedChunks?: number;
       retryDelayTotalMs?: number;
+      retryDelayMaxMs?: number;
       retryDelayAverageMs?: number;
       retryAfterRetries?: number;
       backoffRetries?: number;
@@ -1086,6 +1087,7 @@ function PlaylistPage() {
             totalAttempts?: number;
             retriedChunks?: number;
             retryDelayTotalMs?: number;
+            retryDelayMaxMs?: number;
             retryDelayAverageMs?: number;
             retryAfterRetries?: number;
             backoffRetries?: number;
@@ -1189,11 +1191,18 @@ function PlaylistPage() {
         )
           ? Math.max(0, Math.floor((data.addTracksChunkStats as { retryDelayAverageMs: number }).retryDelayAverageMs))
           : null;
+        const chunkRetryDelayMaxMs = (
+          typeof data?.addTracksChunkStats === 'object'
+          && data.addTracksChunkStats !== null
+          && typeof (data.addTracksChunkStats as { retryDelayMaxMs?: unknown }).retryDelayMaxMs === 'number'
+        )
+          ? Math.max(0, Math.floor((data.addTracksChunkStats as { retryDelayMaxMs: number }).retryDelayMaxMs))
+          : null;
         const chunkRetrySummary = (
           typeof data?.addTracksAttemptsTotal === 'number'
           && typeof data?.addTracksChunksRetried === 'number'
         )
-          ? `chunk attempts ${Math.max(0, Math.floor(data.addTracksAttemptsTotal))}, retries ${Math.max(0, Math.floor(data.addTracksChunksRetried))}${chunkRetryDelayAverageMs !== null ? `, retry delay avg ${chunkRetryDelayAverageMs}ms` : ''}`
+          ? `chunk attempts ${Math.max(0, Math.floor(data.addTracksAttemptsTotal))}, retries ${Math.max(0, Math.floor(data.addTracksChunksRetried))}${chunkRetryDelayAverageMs !== null ? `, retry delay avg ${chunkRetryDelayAverageMs}ms` : ''}${chunkRetryDelayMaxMs !== null ? `, retry delay max ${chunkRetryDelayMaxMs}ms` : ''}`
           : '';
         const baseError = typeof data?.error === 'string' && data.error.trim().length > 0
           ? data.error.trim()
@@ -1346,6 +1355,7 @@ function PlaylistPage() {
                 {' '}attempts: {spotifyMatchDetails.addTracksChunkStats.totalAttempts ?? 0},
                 {' '}retries: {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0},
                 {' '}retry delay total: {spotifyMatchDetails.addTracksChunkStats.retryDelayTotalMs ?? 0}ms,
+                {' '}retry delay max: {spotifyMatchDetails.addTracksChunkStats.retryDelayMaxMs ?? 0}ms,
                 {' '}retry delay avg: {spotifyMatchDetails.addTracksChunkStats.retryDelayAverageMs ?? 0}ms,
                 {' '}retry-after retries: {spotifyMatchDetails.addTracksChunkStats.retryAfterRetries ?? 0},
                 {' '}backoff retries: {spotifyMatchDetails.addTracksChunkStats.backoffRetries ?? 0},

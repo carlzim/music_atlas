@@ -733,6 +733,45 @@ function runSongTitleFeaturingExtractCase(): ParserCaseResult {
   }
 }
 
+function runSongTitleDuetExtractCase(): ParserCaseResult {
+  const id = 'playlist_parse_song_title_duet_extract';
+  const payload = JSON.stringify({
+    title: 'Test',
+    description: 'Test',
+    tracks: [
+      {
+        artist: 'Lill Lindfors',
+        song: 'Sa vill jag bli - duett med Billy Gezon',
+        reason: 'Test reason',
+      },
+    ],
+  });
+
+  try {
+    const parsed = parsePlaylistResponseForEval(payload);
+    const track = parsed.tracks[0] as {
+      artist?: string;
+      song?: string;
+      featured_artists?: string[];
+    };
+    const featured = Array.isArray(track.featured_artists) ? track.featured_artists : [];
+    const pass = track.artist === 'Lill Lindfors'
+      && track.song === 'Sa vill jag bli'
+      && featured.includes('Billy Gezon');
+    return {
+      id,
+      pass,
+      details: `artist="${track.artist || ''}" song="${track.song || ''}" featured=${JSON.stringify(featured)}`,
+    };
+  } catch (error) {
+    return {
+      id,
+      pass: false,
+      details: `parse error=${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 function runFullArtistNamePreservedCase(): ParserCaseResult {
   const id = 'playlist_parse_full_artist_name_preserved';
   const payload = JSON.stringify({
@@ -854,6 +893,7 @@ function run(): void {
     runArtistFieldFeaturingSplitCase(),
     runArtistFieldSwedishOchSplitCase(),
     runSongTitleFeaturingExtractCase(),
+    runSongTitleDuetExtractCase(),
     runFullArtistNamePreservedCase(),
   ];
 

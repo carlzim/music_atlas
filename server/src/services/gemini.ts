@@ -3514,7 +3514,18 @@ function parsePlaylistResponse(text: string): Playlist {
       return '';
     }).replace(/\s+/g, ' ').trim();
 
+    const duetRegex = /\((?:duett\s+med|duet\s+with|with|med)\s+([^)]{1,120})\)/ig;
+    cleanSong = cleanSong.replace(duetRegex, (_match, group: string) => {
+      featuredNames.push(...splitCollaboratorNames(group || ''));
+      return '';
+    }).replace(/\s+/g, ' ').trim();
+
     cleanSong = cleanSong.replace(/\s*[-–—]\s*(?:feat\.?|featuring|ft\.?)\s+(.+)$/i, (_match, group: string) => {
+      featuredNames.push(...splitCollaboratorNames(group || ''));
+      return '';
+    }).replace(/\s+/g, ' ').trim();
+
+    cleanSong = cleanSong.replace(/\s*(?:[-–—]|,)\s*(?:duett\s+med|duet\s+with|with|med)\s+(.+)$/i, (_match, group: string) => {
       featuredNames.push(...splitCollaboratorNames(group || ''));
       return '';
     }).replace(/\s+/g, ' ').trim();

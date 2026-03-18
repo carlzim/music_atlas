@@ -67,6 +67,12 @@ const GLOBAL_RATE_LIMIT_MAX_MS = 60 * 1000;
 const PRIMARY_ARTIST_ALIAS_OVERRIDES: Record<string, string[]> = {
   'lill': ['Lill Lindfors'],
   'pugh': ['Pugh Rogefeldt'],
+  'ann louise': ['Ann-Louise Hansson'],
+  'ann-louise': ['Ann-Louise Hansson'],
+  'anna lena': ['Anna-Lena Lofgren'],
+  'anna-lena': ['Anna-Lena Lofgren'],
+  'ann lena': ['Anna-Lena Lofgren'],
+  'ann-lena': ['Anna-Lena Lofgren'],
 };
 
 async function getAccessToken(): Promise<string | null> {

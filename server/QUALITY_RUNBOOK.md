@@ -130,6 +130,55 @@ Current ranking intentionally prefers canonical versions unless prompts explicit
 
 This keeps default user requests closer to standard/canonical recordings while preserving expected behavior for explicit variant prompts.
 
+### Artist parsing and collaborator matching (v1)
+
+Recent matching work adds safer handling for truncated artist names and collaboration text.
+
+- Generated playlist parsing now separates collaboration metadata:
+  - `artist`: primary artist (used for matching)
+  - `featured_artists`: parsed guest artist list
+  - `artist_display`: original collaboration display string
+- Collaboration parsing supports common English + Swedish forms:
+  - `feat`, `featuring`, `ft`
+  - `duett med`, `with`, `med`
+  - delimiter splits including `&`, `and`, `och`, `,`, `x`, `+` (guarded)
+- Spotify matching uses layered artist strategies:
+  - exact primary-artist match
+  - safe primary prefix fallback (for truncated names)
+  - guarded alias expansion for known short forms
+  - fallback candidate/diagnostic searches using featured and display artist forms
+- Tie-breaks now prefer stronger artist match modes when score is equal:
+  - `exact` > `prefix` > `alias` > `other`
+
+Additional search resilience for this class of failures:
+
+- Song title query fallbacks for shortened variants (before `-`, `/`, `:`, `|`).
+- ASCII/diacritic-stripped fallback queries for song titles.
+- Artist-key normalization strips ensemble suffixes (e.g. `Orkester`, `Band`, `Trio`) in a guarded way.
+
+### Artist/collab diagnostics fields
+
+`POST /api/spotify/save-playlist/:id` includes counters to validate artist parsing improvements in real playlists:
+
+- `artistNormalizationStats.tracksWithFeaturedArtists`
+- `artistNormalizationStats.tracksWithArtistDisplay`
+- `artistNormalizationStats.featuredArtistFallbackAttempts`
+- `artistNormalizationStats.featuredArtistFallbackMatches`
+- `artistNormalizationStats.featuredArtistDiagnosticFallbackAttempts`
+- `artistNormalizationStats.featuredArtistDiagnosticFallbackMatches`
+- `artistNormalizationStats.displayArtistFallbackAttempts`
+- `artistNormalizationStats.displayArtistFallbackMatches`
+- `artistNormalizationStats.searchExactArtistMatches`
+- `artistNormalizationStats.searchPrefixArtistMatches`
+- `artistNormalizationStats.searchAliasArtistMatches`
+- `artistNormalizationStats.searchOtherArtistMatches`
+
+Quick interpretation:
+
+- High `searchExactArtistMatches`: healthy canonical artist quality.
+- High `searchPrefixArtistMatches` or `searchAliasArtistMatches`: generation still emits truncated names; guardrails are rescuing matches.
+- High featured/display fallback attempts with low matches: collaboration text is being parsed, but query forms still need tuning.
+
 ## If A Check Fails
 
 1. Run `npm run eval:coverage` to inspect current counts.

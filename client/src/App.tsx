@@ -894,6 +894,7 @@ function PlaylistPage() {
     addedTracks: number;
     matched: number;
     skipped: number;
+    skippedTracksTotal: number;
     duplicateUriMatches: number;
     uncertainMatches: number;
     skipReasonCounts: Record<string, number>;
@@ -1041,6 +1042,9 @@ function PlaylistPage() {
         addedTracks: typeof data.addedTracks === 'number' ? data.addedTracks : 0,
         matched: typeof data.matched === 'number' ? data.matched : 0,
         skipped: typeof data.skipped === 'number' ? data.skipped : 0,
+        skippedTracksTotal: typeof data.skippedTracksTotal === 'number'
+          ? Math.max(0, Math.floor(data.skippedTracksTotal))
+          : (typeof data.skipped === 'number' ? Math.max(0, Math.floor(data.skipped)) : 0),
         duplicateUriMatches: typeof data.duplicateUriMatches === 'number' ? data.duplicateUriMatches : 0,
         uncertainMatches: typeof data.uncertainMatches === 'number' ? data.uncertainMatches : 0,
         skipReasonCounts: data.skipReasonCounts && typeof data.skipReasonCounts === 'object'
@@ -1204,7 +1208,12 @@ function PlaylistPage() {
             )}
             {spotifyMatchDetails.skippedTracks.length > 0 && (
               <details className="verification-details">
-                <summary>Skipped tracks ({spotifyMatchDetails.skippedTracks.length})</summary>
+                <summary>
+                  Skipped tracks sample ({spotifyMatchDetails.skippedTracks.length}
+                  {spotifyMatchDetails.skippedTracksTotal > spotifyMatchDetails.skippedTracks.length
+                    ? ` of ${spotifyMatchDetails.skippedTracksTotal}`
+                    : ''})
+                </summary>
                 <ul className="playlist-list">
                   {spotifyMatchDetails.skippedTracks.map((track, idx) => (
                     <li key={`${track.artist}-${track.song}-${idx}`} className="playlist-item">

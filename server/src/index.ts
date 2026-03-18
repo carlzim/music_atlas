@@ -949,6 +949,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       error: 'No Spotify-matched tracks found in this playlist',
       matched,
       skipped,
+      skippedTracksTotal: skippedTracks.length,
       uncertainMatches: uncertainSearchMatches,
       skipReasonCounts,
       skippedTracks: skippedTracks.slice(0, 20),
@@ -1054,6 +1055,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       skipped,
       duplicateUriMatches,
       uncertainMatches: uncertainSearchMatches,
+      skippedTracksTotal: skippedTracks.length,
       skipReasonCounts,
       skippedTracks: skippedTracks.slice(0, 20),
       matchSources: {

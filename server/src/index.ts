@@ -852,6 +852,13 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   }
 
   const dedupedUris = Array.from(new Set(uris));
+  const skipReasonCounts = skippedTracks.reduce<Record<string, number>>((acc, item) => {
+    const key = typeof item.reason === 'string' && item.reason.trim().length > 0
+      ? item.reason.trim().toLowerCase()
+      : 'unknown';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
 
   const matched = matchedTrackCount;
   const skipped = trackQueries.length - matched;
@@ -868,6 +875,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   console.log('[spotify-save] discovered isrc count:', discoveredIsrcCount);
   console.log('[spotify-save] searched spotify matches:', searchedSpotifyMatches);
   console.log('[spotify-save] uncertain search matches:', uncertainSearchMatches);
+  console.log('[spotify-save] skip reason counts:', skipReasonCounts);
   console.log('[spotify-save] first track uris:', dedupedUris.slice(0, 5));
 
   if (matched === 0) {
@@ -967,6 +975,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       skipped,
       duplicateUriMatches,
       uncertainMatches: uncertainSearchMatches,
+      skipReasonCounts,
       skippedTracks: skippedTracks.slice(0, 20),
       matchSources: {
         trackSpotifyUrl: reusedExistingSpotifyUrls,

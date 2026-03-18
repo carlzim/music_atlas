@@ -896,6 +896,7 @@ function PlaylistPage() {
     skipped: number;
     duplicateUriMatches: number;
     uncertainMatches: number;
+    skipReasonCounts: Record<string, number>;
     skippedTracks: Array<{ artist: string; song: string; reason?: string }>;
     matchSources?: {
       trackSpotifyUrl?: number;
@@ -1031,6 +1032,14 @@ function PlaylistPage() {
         skipped: typeof data.skipped === 'number' ? data.skipped : 0,
         duplicateUriMatches: typeof data.duplicateUriMatches === 'number' ? data.duplicateUriMatches : 0,
         uncertainMatches: typeof data.uncertainMatches === 'number' ? data.uncertainMatches : 0,
+        skipReasonCounts: data.skipReasonCounts && typeof data.skipReasonCounts === 'object'
+          ? Object.entries(data.skipReasonCounts as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, value]) => {
+              if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+                acc[key] = Math.floor(value);
+              }
+              return acc;
+            }, {})
+          : {},
         skippedTracks: Array.isArray(data.skippedTracks)
           ? data.skippedTracks
               .filter((item: unknown): item is { artist: string; song: string } => {
@@ -1173,6 +1182,14 @@ function PlaylistPage() {
             )}
             {spotifyMatchDetails.uncertainMatches > 0 && (
               <p>{spotifyMatchDetails.uncertainMatches} matches had low confidence (score &lt;= 0). Review skipped list and rerun if needed.</p>
+            )}
+            {Object.keys(spotifyMatchDetails.skipReasonCounts).length > 0 && (
+              <p>
+                Skip reasons:{' '}
+                {Object.entries(spotifyMatchDetails.skipReasonCounts)
+                  .map(([reason, count]) => `${reason.replace(/_/g, ' ')} (${count})`)
+                  .join(', ')}
+              </p>
             )}
             {spotifyMatchDetails.skippedTracks.length > 0 && (
               <details className="verification-details">

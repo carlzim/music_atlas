@@ -664,7 +664,11 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   for (const track of trackQueries) {
     let matchedCurrentTrack = false;
     let skipReason = 'no_match_found';
-    const existingUri = typeof track.spotify_url === 'string' ? spotifyUrlToUri(track.spotify_url) : null;
+    const existingSpotifyUri = typeof (track as { spotify_uri?: unknown }).spotify_uri === 'string'
+      ? String((track as { spotify_uri?: string }).spotify_uri || '').trim()
+      : '';
+    const existingSpotifyUrl = typeof track.spotify_url === 'string' ? track.spotify_url.trim() : '';
+    const existingUri = existingSpotifyUri || (existingSpotifyUrl ? spotifyUrlToUri(existingSpotifyUrl) : null);
     if (existingUri && usedUris.has(existingUri)) {
       skipReason = 'existing_uri_already_used';
     }
@@ -672,11 +676,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       uris.push(existingUri);
       usedUris.add(existingUri);
       reusedExistingSpotifyUrls += 1;
-      if (typeof track.spotify_url === 'string' && track.spotify_url.trim().length > 0) {
-        const existingSpotifyUri = typeof (track as { spotify_uri?: unknown }).spotify_uri === 'string'
-          ? String((track as { spotify_uri?: string }).spotify_uri || '').trim()
-          : undefined;
-        playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: track.spotify_url.trim(), spotifyUri: existingSpotifyUri });
+      const normalizedExistingUrl = existingSpotifyUrl || (existingUri ? spotifyUriToUrl(existingUri) : null);
+      if (normalizedExistingUrl) {
+        playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: normalizedExistingUrl, spotifyUri: existingUri });
       }
       matchedCurrentTrack = true;
       matchedTrackCount += 1;

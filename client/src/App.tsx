@@ -910,6 +910,8 @@ function PlaylistPage() {
     artistNormalizationStats?: {
       tracksWithFeaturedArtists?: number;
       tracksWithArtistDisplay?: number;
+      displayArtistFallbackAttempts?: number;
+      displayArtistFallbackMatches?: number;
       searchExactArtistMatches?: number;
       searchPrefixArtistMatches?: number;
       searchAliasArtistMatches?: number;
@@ -1115,6 +1117,8 @@ function PlaylistPage() {
         ? payload.artistNormalizationStats as {
             tracksWithFeaturedArtists?: number;
             tracksWithArtistDisplay?: number;
+            displayArtistFallbackAttempts?: number;
+            displayArtistFallbackMatches?: number;
             searchExactArtistMatches?: number;
             searchPrefixArtistMatches?: number;
             searchAliasArtistMatches?: number;
@@ -1446,6 +1450,8 @@ function PlaylistPage() {
               <p>
                 Artist normalization: featured splits {spotifyMatchDetails.artistNormalizationStats.tracksWithFeaturedArtists ?? 0},
                 {' '}display aliases {spotifyMatchDetails.artistNormalizationStats.tracksWithArtistDisplay ?? 0},
+                {' '}display fallback attempts {spotifyMatchDetails.artistNormalizationStats.displayArtistFallbackAttempts ?? 0},
+                {' '}display fallback matches {spotifyMatchDetails.artistNormalizationStats.displayArtistFallbackMatches ?? 0},
                 {' '}search exact {spotifyMatchDetails.artistNormalizationStats.searchExactArtistMatches ?? 0},
                 {' '}search prefix {spotifyMatchDetails.artistNormalizationStats.searchPrefixArtistMatches ?? 0},
                 {' '}search alias {spotifyMatchDetails.artistNormalizationStats.searchAliasArtistMatches ?? 0},

@@ -715,6 +715,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   const artistNormalizationStats = {
     tracksWithFeaturedArtists: trackQueries.filter((track) => Array.isArray(track.featured_artists) && track.featured_artists.length > 0).length,
     tracksWithArtistDisplay: trackQueries.filter((track) => typeof track.artist_display === 'string' && track.artist_display.trim().length > 0).length,
+    displayArtistFallbackAttempts: 0,
+    displayArtistFallbackMatches: 0,
     searchExactArtistMatches: 0,
     searchPrefixArtistMatches: 0,
     searchAliasArtistMatches: 0,
@@ -902,6 +904,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       let selectedDurationMs: number | null = null;
       let selectedScore: number | null = null;
       let selectedArtistMatchMode: 'exact' | 'prefix' | 'alias' | 'other' | null = null;
+      const displayArtist = typeof track.artist_display === 'string' ? track.artist_display.trim() : '';
+      const canTryDisplayArtistFallback = displayArtist.length > 0 && displayArtist !== track.artist;
 
       for (const candidate of candidates) {
         const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
@@ -991,6 +995,35 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         }
       }
 
+      if ((!selectedUrl || !selectedUri) && canTryDisplayArtistFallback) {
+        artistNormalizationStats.displayArtistFallbackAttempts += 1;
+        const spotifyInfo = await searchTrackWithDiagnostics(displayArtist, track.song, playlist.prompt, recordingDurationMs);
+        if (spotifyInfo.spotify_url || spotifyInfo.spotify_uri) {
+          const fallbackUri = typeof spotifyInfo.spotify_uri === 'string' && spotifyInfo.spotify_uri.trim().length > 0
+            ? spotifyInfo.spotify_uri.trim()
+            : (spotifyInfo.spotify_url ? spotifyUrlToUri(spotifyInfo.spotify_url) : null);
+          const fallbackUrl = spotifyInfo.spotify_url || (fallbackUri ? spotifyUriToUrl(fallbackUri) : null);
+          if (fallbackUri && fallbackUrl && !usedUris.has(fallbackUri)) {
+            selectedUrl = fallbackUrl;
+            selectedUri = fallbackUri;
+            selectedDurationMs = typeof spotifyInfo.duration_ms === 'number' && Number.isFinite(spotifyInfo.duration_ms)
+              ? spotifyInfo.duration_ms
+              : null;
+            selectedScore = typeof spotifyInfo.score === 'number' && Number.isFinite(spotifyInfo.score)
+              ? spotifyInfo.score
+              : null;
+            selectedArtistMatchMode = spotifyInfo.artist_match_mode === 'exact' || spotifyInfo.artist_match_mode === 'prefix' || spotifyInfo.artist_match_mode === 'alias' || spotifyInfo.artist_match_mode === 'other'
+              ? spotifyInfo.artist_match_mode
+              : null;
+            artistNormalizationStats.displayArtistFallbackMatches += 1;
+          } else if (fallbackUri && usedUris.has(fallbackUri)) {
+            skipReason = 'fallback_display_uri_collision';
+          }
+        } else if (skipReason === 'fallback_no_match' || skipReason === 'search_no_candidates') {
+          skipReason = 'fallback_display_no_match';
+        }
+      }
+
       if (selectedUrl && selectedUri) {
         uris.push(selectedUri);
         usedUris.add(selectedUri);
@@ -1056,6 +1089,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   console.log('[spotify-save] matched via isrc:', matchedViaIsrc);
   console.log('[spotify-save] discovered isrc count:', discoveredIsrcCount);
   console.log('[spotify-save] searched spotify matches:', searchedSpotifyMatches);
+  console.log('[spotify-save] display-artist fallback attempts:', artistNormalizationStats.displayArtistFallbackAttempts);
+  console.log('[spotify-save] display-artist fallback matches:', artistNormalizationStats.displayArtistFallbackMatches);
   console.log('[spotify-save] uncertain search matches:', uncertainSearchMatches);
   console.log('[spotify-save] skip reason counts:', skipReasonCounts);
   console.log('[spotify-save] first track uris:', dedupedUris.slice(0, 5));

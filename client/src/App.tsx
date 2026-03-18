@@ -997,6 +997,79 @@ function PlaylistPage() {
 
   const { primary: primaryEquipment, related: relatedEquipment } = splitPrimaryAndRelatedEquipmentWithPrompt(playlist, prompt);
 
+  const buildSpotifyMatchDetails = (data: Record<string, unknown> | null | undefined) => {
+    const payload = data || {};
+    return {
+      addedTracks: typeof payload.addedTracks === 'number' ? payload.addedTracks : 0,
+      matched: typeof payload.matched === 'number' ? payload.matched : 0,
+      skipped: typeof payload.skipped === 'number' ? payload.skipped : 0,
+      skippedTracksTotal: typeof payload.skippedTracksTotal === 'number'
+        ? Math.max(0, Math.floor(payload.skippedTracksTotal))
+        : (typeof payload.skipped === 'number' ? Math.max(0, Math.floor(payload.skipped)) : 0),
+      duplicateUriMatches: typeof payload.duplicateUriMatches === 'number' ? payload.duplicateUriMatches : 0,
+      uncertainMatches: typeof payload.uncertainMatches === 'number' ? payload.uncertainMatches : 0,
+      uncertainTracks: Array.isArray(payload.uncertainTracks)
+        ? payload.uncertainTracks
+            .filter((item: unknown): item is { artist: string; song: string; score: number } => {
+              return Boolean(
+                item
+                  && typeof item === 'object'
+                  && typeof (item as { artist?: unknown }).artist === 'string'
+                  && typeof (item as { song?: unknown }).song === 'string'
+                  && typeof (item as { score?: unknown }).score === 'number'
+              );
+            })
+            .slice(0, 20)
+        : [],
+      matchedTracksSample: Array.isArray(payload.matchedTracksSample)
+        ? payload.matchedTracksSample
+            .filter((item: unknown): item is { artist: string; song: string; source: string; score?: number | null } => {
+              return Boolean(
+                item
+                  && typeof item === 'object'
+                  && typeof (item as { artist?: unknown }).artist === 'string'
+                  && typeof (item as { song?: unknown }).song === 'string'
+                  && typeof (item as { source?: unknown }).source === 'string'
+              );
+            })
+            .slice(0, 20)
+        : [],
+      skipReasonCounts: payload.skipReasonCounts && typeof payload.skipReasonCounts === 'object'
+        ? Object.entries(payload.skipReasonCounts as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, value]) => {
+            if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+              acc[key] = Math.floor(value);
+            }
+            return acc;
+          }, {})
+        : {},
+      skippedTracks: Array.isArray(payload.skippedTracks)
+        ? payload.skippedTracks
+            .filter((item: unknown): item is { artist: string; song: string } => {
+              return Boolean(
+                item
+                  && typeof item === 'object'
+                  && typeof (item as { artist?: unknown }).artist === 'string'
+                  && typeof (item as { song?: unknown }).song === 'string'
+              );
+            })
+            .map((item) => ({
+              artist: item.artist,
+              song: item.song,
+              reason: typeof (item as { reason?: unknown }).reason === 'string'
+                ? String((item as { reason?: unknown }).reason)
+                : undefined,
+            }))
+            .slice(0, 20)
+        : [],
+      matchSources: payload.matchSources && typeof payload.matchSources === 'object'
+        ? payload.matchSources as { trackSpotifyUrl?: number; recordingSpotifyUrl?: number; isrc?: number; search?: number }
+        : undefined,
+      addTracksChunkStats: payload.addTracksChunkStats && typeof payload.addTracksChunkStats === 'object'
+        ? payload.addTracksChunkStats as { totalChunks?: number; totalAttempts?: number; retriedChunks?: number }
+        : undefined,
+    };
+  };
+
   const handleSaveToSpotify = async () => {
     console.log('Save to Spotify clicked');
     if (!id) {
@@ -1024,6 +1097,7 @@ function PlaylistPage() {
       }
 
       if (!response.ok) {
+        const details = buildSpotifyMatchDetails(data && typeof data === 'object' ? data as Record<string, unknown> : null);
         const partialSpotifyPlaylistUrl = typeof data?.spotifyPlaylistUrl === 'string' && data.spotifyPlaylistUrl.trim().length > 0
           ? data.spotifyPlaylistUrl.trim()
           : null;
@@ -1060,7 +1134,10 @@ function PlaylistPage() {
         const detailedError = detailParts.length > 0
           ? `${baseError} — ${detailParts.join(' | ')}`
           : baseError;
-        throw new Error(detailedError);
+        setSpotifyState('error');
+        setSpotifyMessage(detailedError);
+        setSpotifyMatchDetails(details);
+        return;
       }
 
       setSpotifyState('success');
@@ -1070,75 +1147,7 @@ function PlaylistPage() {
         setSpotifyMessage(`Saved ${data.addedTracks} tracks to Spotify.`);
       }
       setSpotifyPlaylistUrl(data.spotifyPlaylistUrl || null);
-      setSpotifyMatchDetails({
-        addedTracks: typeof data.addedTracks === 'number' ? data.addedTracks : 0,
-        matched: typeof data.matched === 'number' ? data.matched : 0,
-        skipped: typeof data.skipped === 'number' ? data.skipped : 0,
-        skippedTracksTotal: typeof data.skippedTracksTotal === 'number'
-          ? Math.max(0, Math.floor(data.skippedTracksTotal))
-          : (typeof data.skipped === 'number' ? Math.max(0, Math.floor(data.skipped)) : 0),
-        duplicateUriMatches: typeof data.duplicateUriMatches === 'number' ? data.duplicateUriMatches : 0,
-        uncertainMatches: typeof data.uncertainMatches === 'number' ? data.uncertainMatches : 0,
-        uncertainTracks: Array.isArray(data.uncertainTracks)
-          ? data.uncertainTracks
-              .filter((item: unknown): item is { artist: string; song: string; score: number } => {
-                return Boolean(
-                  item
-                    && typeof item === 'object'
-                    && typeof (item as { artist?: unknown }).artist === 'string'
-                    && typeof (item as { song?: unknown }).song === 'string'
-                    && typeof (item as { score?: unknown }).score === 'number'
-                );
-              })
-              .slice(0, 20)
-          : [],
-        matchedTracksSample: Array.isArray(data.matchedTracksSample)
-          ? data.matchedTracksSample
-              .filter((item: unknown): item is { artist: string; song: string; source: string; score?: number | null } => {
-                return Boolean(
-                  item
-                    && typeof item === 'object'
-                    && typeof (item as { artist?: unknown }).artist === 'string'
-                    && typeof (item as { song?: unknown }).song === 'string'
-                    && typeof (item as { source?: unknown }).source === 'string'
-                );
-              })
-              .slice(0, 20)
-          : [],
-        skipReasonCounts: data.skipReasonCounts && typeof data.skipReasonCounts === 'object'
-          ? Object.entries(data.skipReasonCounts as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, value]) => {
-              if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-                acc[key] = Math.floor(value);
-              }
-              return acc;
-            }, {})
-          : {},
-        skippedTracks: Array.isArray(data.skippedTracks)
-          ? data.skippedTracks
-              .filter((item: unknown): item is { artist: string; song: string } => {
-                return Boolean(
-                  item
-                    && typeof item === 'object'
-                    && typeof (item as { artist?: unknown }).artist === 'string'
-                    && typeof (item as { song?: unknown }).song === 'string'
-                );
-              })
-              .map((item) => ({
-                artist: item.artist,
-                song: item.song,
-                reason: typeof (item as { reason?: unknown }).reason === 'string'
-                  ? (item as { reason: string }).reason
-                  : undefined,
-              }))
-              .slice(0, 20)
-          : [],
-        matchSources: data.matchSources && typeof data.matchSources === 'object'
-          ? data.matchSources as { trackSpotifyUrl?: number; recordingSpotifyUrl?: number; isrc?: number; search?: number }
-          : undefined,
-        addTracksChunkStats: data.addTracksChunkStats && typeof data.addTracksChunkStats === 'object'
-          ? data.addTracksChunkStats as { totalChunks?: number; totalAttempts?: number; retriedChunks?: number }
-          : undefined,
-      });
+      setSpotifyMatchDetails(buildSpotifyMatchDetails(data && typeof data === 'object' ? data as Record<string, unknown> : null));
     } catch (err) {
       setSpotifyState('error');
       setSpotifyMessage(err instanceof Error ? err.message : 'Failed to save playlist to Spotify');

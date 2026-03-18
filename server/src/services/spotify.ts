@@ -237,6 +237,20 @@ function isLikelyVariantCandidate(candidate: Pick<SpotifyCandidate, 'title' | 'a
   return /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b|\bremaster(?:ed)?\b|\bacoustic\b|\bdemo\b|\binstrumental\b|\bkaraoke\b|\bcover\b|\btribute\b|\bsped\s*up\b|\bslowed\b|\bnightcore\b|\breverb\b|\bversion\b/.test(text);
 }
 
+function stripEnsembleSuffix(value: string): string {
+  const normalizedDisplay = canonicalizeDisplayName(value || '').trim();
+  if (!normalizedDisplay) return '';
+  const stripped = normalizedDisplay
+    .replace(/\s+[’']?s\s+(orkester|orchestra|band|ensemble|group|trio|quartet|kvartett|kvintett|sextett)$/i, '')
+    .replace(/\s+(orkester|orchestra|band|ensemble|group|trio|quartet|kvartett|kvintett|sextett)$/i, '')
+    .trim();
+  if (!stripped || stripped === normalizedDisplay) return '';
+  const normalized = normalizeForMatch(stripped);
+  if (!normalized) return '';
+  if (normalized.split(/\s+/g).join('').length < 5) return '';
+  return stripped;
+}
+
 function getArtistMatchKeys(value: string): Set<string> {
   const display = canonicalizeDisplayName(value);
   const keys = new Set<string>();
@@ -249,6 +263,18 @@ function getArtistMatchKeys(value: string): Set<string> {
 
   const artistKey = buildArtistCanonicalKey(display);
   if (artistKey) keys.add(artistKey);
+
+  const strippedEnsemble = stripEnsembleSuffix(display);
+  if (strippedEnsemble) {
+    const strippedNormalized = normalizeForMatch(strippedEnsemble);
+    if (strippedNormalized) keys.add(strippedNormalized);
+
+    const strippedPersonKey = buildPersonCanonicalKey(strippedEnsemble);
+    if (strippedPersonKey) keys.add(strippedPersonKey);
+
+    const strippedArtistKey = buildArtistCanonicalKey(strippedEnsemble);
+    if (strippedArtistKey) keys.add(strippedArtistKey);
+  }
 
   return keys;
 }

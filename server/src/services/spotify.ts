@@ -240,22 +240,45 @@ function splitSpotifyArtistContributors(value: string): { primaryArtist: string;
   const normalized = canonicalizeDisplayName(value || '').trim();
   if (!normalized) return { primaryArtist: '', featuredArtists: [] };
 
+  const splitContributorList = (input: string, primaryArtist: string): string[] => {
+    return input
+      .split(/\s*(?:,|&|\band\b|\bx\b|\+)\s*/i)
+      .map((item) => canonicalizeDisplayName(item))
+      .map((item) => item.replace(/^[-:\s]+/, '').replace(/[.!?,;:]+$/g, '').trim())
+      .filter((item) => item.length > 0)
+      .filter((item) => normalizeForMatch(item) !== normalizeForMatch(primaryArtist));
+  };
+
   const markerMatch = normalized.match(/^(.*?)\s*(?:,?\s*(?:feat\.?|featuring|ft\.?|duett\s+med|duet\s+with|with)\s+)(.+)$/i);
-  if (!markerMatch) {
-    return { primaryArtist: normalized, featuredArtists: [] };
+  if (markerMatch) {
+    const primaryArtist = canonicalizeDisplayName(markerMatch[1] || '').trim();
+    const featuredArtists = splitContributorList(markerMatch[2] || '', primaryArtist);
+
+    return {
+      primaryArtist: primaryArtist || normalized,
+      featuredArtists: Array.from(new Set(featuredArtists.map((item) => canonicalizeDisplayName(item))))
+    };
   }
 
-  const primaryArtist = canonicalizeDisplayName(markerMatch[1] || '').trim();
-  const featuredArtists = (markerMatch[2] || '')
-    .split(/\s*(?:,|&|\band\b|\bx\b|\+)\s*/i)
-    .map((item) => canonicalizeDisplayName(item))
-    .map((item) => item.replace(/^[-:\s]+/, '').replace(/[.!?,;:]+$/g, '').trim())
-    .filter((item) => item.length > 0)
-    .filter((item) => normalizeForMatch(item) !== normalizeForMatch(primaryArtist));
+  const delimiterParts = splitContributorList(normalized, '');
+  if (delimiterParts.length >= 2) {
+    const primaryArtist = delimiterParts[0];
+    const featuredArtists = delimiterParts.slice(1)
+      .filter((item) => normalizeForMatch(item) !== normalizeForMatch(primaryArtist));
+    const primaryWordCount = toArtistWordTokens(primaryArtist).length;
+    const primaryLength = toArtistWordTokens(primaryArtist).join('').length;
+    const looksLikeMainArtistWithGuests = primaryWordCount >= 2 && primaryLength >= 6;
+    if (looksLikeMainArtistWithGuests) {
+      return {
+        primaryArtist,
+        featuredArtists: Array.from(new Set(featuredArtists.map((item) => canonicalizeDisplayName(item))))
+      };
+    }
+  }
 
   return {
-    primaryArtist: primaryArtist || normalized,
-    featuredArtists: Array.from(new Set(featuredArtists.map((item) => canonicalizeDisplayName(item))))
+    primaryArtist: normalized,
+    featuredArtists: []
   };
 }
 

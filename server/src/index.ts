@@ -814,6 +814,28 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         break;
       }
 
+      if (!selectedUrl && candidates.length > 0 && candidateUriCollisionCount >= candidates.length) {
+        const extendedCandidates = await searchTrackCandidates(track.artist, track.song, playlist.prompt, 20, recordingDurationMs);
+        for (const candidate of extendedCandidates) {
+          const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
+            ? candidate.spotify_uri.trim()
+            : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
+          if (!candidateUri) continue;
+          const candidateUrl = candidate.spotify_url || spotifyUriToUrl(candidateUri);
+          if (!candidateUrl) continue;
+          if (usedUris.has(candidateUri)) continue;
+          selectedUrl = candidateUrl;
+          selectedUri = candidateUri;
+          selectedDurationMs = typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms)
+            ? candidate.duration_ms
+            : null;
+          selectedScore = typeof candidate.score === 'number' && Number.isFinite(candidate.score)
+            ? candidate.score
+            : null;
+          break;
+        }
+      }
+
       if (!selectedUrl) {
         if (candidates.length === 0) {
           skipReason = 'search_no_candidates';

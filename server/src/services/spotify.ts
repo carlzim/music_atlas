@@ -664,6 +664,30 @@ function sanitizeQueryValue(value: string): string {
   return value.replace(/["”“]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function getSongQueryFallbackTitles(song: string): string[] {
+  const source = sanitizeQueryValue(cleanSongTitle(song) || song);
+  if (!source) return [];
+
+  const rawCandidates = [
+    source,
+    source.split(/\s*[-–—]\s*/)[0] || '',
+    source.split(/\s*\/\s*/)[0] || '',
+    source.split(/\s*:\s*/)[0] || '',
+    source.split(/\s*\|\s*/)[0] || '',
+  ];
+
+  const unique = new Set<string>();
+  for (const raw of rawCandidates) {
+    const candidate = sanitizeQueryValue(raw);
+    if (!candidate) continue;
+    if (candidate === source) continue;
+    if (candidate.length < 3) continue;
+    unique.add(candidate);
+  }
+
+  return Array.from(unique);
+}
+
 async function searchSpotify(query: string, token: string, limit = 5): Promise<SpotifySearchResult> {
   const REQUEST_THROTTLE_MS = 300;
   const params = new URLSearchParams({
@@ -788,6 +812,7 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
   if (isExpired) {
     const requested = getRequestedArtistKeys(artist);
     const safeSong = sanitizeQueryValue(cleanSongTitle(song) || song);
+    const fallbackSongTitles = getSongQueryFallbackTitles(song);
     const safeSongAscii = sanitizeQueryValue(stripDiacritics(cleanSongTitle(song) || song));
     const hasDistinctAsciiSong = safeSongAscii.length > 0 && safeSongAscii !== safeSong;
     const safeArtist = sanitizeQueryValue(requested.primaryArtist || artist);
@@ -833,6 +858,17 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
         result = await searchSpotify(originalStructuredQuery, token, 10);
         if (result.candidates.length === 0 && !result.rateLimitedAbort) {
           result = await searchSpotify(originalFallbackQuery, token, 10);
+        }
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && fallbackSongTitles.length > 0) {
+        for (const fallbackSongTitle of fallbackSongTitles) {
+          const structuredVariantQuery = `track:"${fallbackSongTitle}" artist:"${safeArtist}"`;
+          const fallbackVariantQuery = `${fallbackSongTitle} ${safeArtist}`.trim();
+          result = await searchSpotify(structuredVariantQuery, token, 10);
+          if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+            result = await searchSpotify(fallbackVariantQuery, token, 10);
+          }
+          if (result.candidates.length > 0 || result.rateLimitedAbort) break;
         }
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctAsciiSong) {
@@ -1033,6 +1069,7 @@ export async function searchTrackCandidates(
   if (isExpired || needsMoreCandidates) {
     const requested = getRequestedArtistKeys(artist);
     const safeSong = sanitizeQueryValue(cleanSongTitle(song) || song);
+    const fallbackSongTitles = getSongQueryFallbackTitles(song);
     const safeSongAscii = sanitizeQueryValue(stripDiacritics(cleanSongTitle(song) || song));
     const hasDistinctAsciiSong = safeSongAscii.length > 0 && safeSongAscii !== safeSong;
     const safeArtist = sanitizeQueryValue(requested.primaryArtist || artist);
@@ -1072,6 +1109,17 @@ export async function searchTrackCandidates(
         result = await searchSpotify(originalStructuredQuery, token, spotifyFetchLimit);
         if (result.candidates.length === 0 && !result.rateLimitedAbort) {
           result = await searchSpotify(originalFallbackQuery, token, spotifyFetchLimit);
+        }
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && fallbackSongTitles.length > 0) {
+        for (const fallbackSongTitle of fallbackSongTitles) {
+          const structuredVariantQuery = `track:"${fallbackSongTitle}" artist:"${safeArtist}"`;
+          const fallbackVariantQuery = `${fallbackSongTitle} ${safeArtist}`.trim();
+          result = await searchSpotify(structuredVariantQuery, token, spotifyFetchLimit);
+          if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+            result = await searchSpotify(fallbackVariantQuery, token, spotifyFetchLimit);
+          }
+          if (result.candidates.length > 0 || result.rateLimitedAbort) break;
         }
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctAsciiSong) {

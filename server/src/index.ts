@@ -972,36 +972,51 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
       if ((!selectedUrl || !selectedUri) && canTryFeaturedArtistFallback) {
         artistNormalizationStats.featuredArtistFallbackAttempts += 1;
-        const featuredFallbackArtist = `${track.artist} feat ${featuredArtists.slice(0, 2).join(' & ')}`;
-        const featuredCandidates = await searchTrackCandidates(featuredFallbackArtist, track.song, playlist.prompt, 6, recordingDurationMs);
+        const featuredNames = featuredArtists.slice(0, 2);
+        const joinedFeatured = featuredNames.join(' & ');
+        const featuredFallbackArtists = Array.from(new Set([
+          `${track.artist} feat ${joinedFeatured}`,
+          `${track.artist} featuring ${joinedFeatured}`,
+          `${track.artist} with ${joinedFeatured}`,
+          `${track.artist}, duett med ${joinedFeatured}`,
+          featuredNames.length === 1 ? `${track.artist} feat ${featuredNames[0]}` : '',
+        ].filter((value) => value && value !== track.artist)));
+
+        let featuredCandidateCountTotal = 0;
         let featuredCandidateCollisionCount = 0;
-        for (const candidate of featuredCandidates) {
-          const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
-            ? candidate.spotify_uri.trim()
-            : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
-          if (!candidateUri) continue;
-          const candidateUrl = candidate.spotify_url || spotifyUriToUrl(candidateUri);
-          if (!candidateUrl) continue;
-          if (usedUris.has(candidateUri)) {
-            featuredCandidateCollisionCount += 1;
-            continue;
+
+        for (const featuredFallbackArtist of featuredFallbackArtists) {
+          if (selectedUrl && selectedUri) break;
+          const featuredCandidates = await searchTrackCandidates(featuredFallbackArtist, track.song, playlist.prompt, 6, recordingDurationMs);
+          featuredCandidateCountTotal += featuredCandidates.length;
+          for (const candidate of featuredCandidates) {
+            const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
+              ? candidate.spotify_uri.trim()
+              : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
+            if (!candidateUri) continue;
+            const candidateUrl = candidate.spotify_url || spotifyUriToUrl(candidateUri);
+            if (!candidateUrl) continue;
+            if (usedUris.has(candidateUri)) {
+              featuredCandidateCollisionCount += 1;
+              continue;
+            }
+            selectedUrl = candidateUrl;
+            selectedUri = candidateUri;
+            selectedDurationMs = typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms)
+              ? candidate.duration_ms
+              : null;
+            selectedScore = typeof candidate.score === 'number' && Number.isFinite(candidate.score)
+              ? candidate.score
+              : null;
+            selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
+              ? candidate.artist_match_mode
+              : null;
+            artistNormalizationStats.featuredArtistFallbackMatches += 1;
+            break;
           }
-          selectedUrl = candidateUrl;
-          selectedUri = candidateUri;
-          selectedDurationMs = typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms)
-            ? candidate.duration_ms
-            : null;
-          selectedScore = typeof candidate.score === 'number' && Number.isFinite(candidate.score)
-            ? candidate.score
-            : null;
-          selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
-            ? candidate.artist_match_mode
-            : null;
-          artistNormalizationStats.featuredArtistFallbackMatches += 1;
-          break;
         }
 
-        if (!selectedUrl && featuredCandidates.length > 0 && featuredCandidateCollisionCount >= featuredCandidates.length) {
+        if (!selectedUrl && featuredCandidateCountTotal > 0 && featuredCandidateCollisionCount >= featuredCandidateCountTotal) {
           skipReason = 'fallback_featured_uri_collision';
         } else if (!selectedUrl && (skipReason === 'search_no_candidates' || skipReason === 'fallback_no_match')) {
           skipReason = 'fallback_featured_no_match';

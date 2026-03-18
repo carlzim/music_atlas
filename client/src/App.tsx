@@ -1023,11 +1023,22 @@ function PlaylistPage() {
               .filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value > 0)
               .map(([reason, value]) => `${reason.replace(/_/g, ' ')} (${Math.floor(value as number)})`)
           : [];
+        const chunkFailureSummary = (
+          typeof data?.addedBeforeFailure === 'number'
+          && typeof data?.failedChunkIndex === 'number'
+          && typeof data?.totalChunks === 'number'
+        )
+          ? `added ${Math.max(0, Math.floor(data.addedBeforeFailure))} tracks before failing in chunk ${Math.max(1, Math.floor(data.failedChunkIndex))}/${Math.max(1, Math.floor(data.totalChunks))}`
+          : '';
         const baseError = typeof data?.error === 'string' && data.error.trim().length > 0
           ? data.error.trim()
           : 'Failed to save playlist to Spotify';
-        const detailedError = skipReasonCounts.length > 0
-          ? `${baseError} — skip reasons: ${skipReasonCounts.join(', ')}`
+        const detailParts = [
+          chunkFailureSummary,
+          skipReasonCounts.length > 0 ? `skip reasons: ${skipReasonCounts.join(', ')}` : '',
+        ].filter((part) => part.length > 0);
+        const detailedError = detailParts.length > 0
+          ? `${baseError} — ${detailParts.join(' | ')}`
           : baseError;
         throw new Error(detailedError);
       }

@@ -1116,6 +1116,15 @@ function PlaylistPage() {
         )
           ? `added ${Math.max(0, Math.floor(data.addedBeforeFailure))} tracks before failing in chunk ${Math.max(1, Math.floor(data.failedChunkIndex))}/${Math.max(1, Math.floor(data.totalChunks))}`
           : '';
+        const chunkFailureDetail = (
+          (typeof data?.failedChunkStatus === 'number' || typeof data?.failedChunkStatus === 'string')
+          || typeof data?.failedChunkAttempt === 'number'
+        )
+          ? `chunk failure details: status ${String(data.failedChunkStatus ?? 'unknown')}, attempt ${typeof data?.failedChunkAttempt === 'number' ? Math.max(1, Math.floor(data.failedChunkAttempt)) : 'n/a'}`
+          : '';
+        const chunkFailureError = typeof data?.failedChunkError === 'string' && data.failedChunkError.trim().length > 0
+          ? `chunk error: ${data.failedChunkError.trim()}`
+          : '';
         const chunkRetrySummary = (
           typeof data?.addTracksAttemptsTotal === 'number'
           && typeof data?.addTracksChunksRetried === 'number'
@@ -1128,6 +1137,8 @@ function PlaylistPage() {
         const detailParts = [
           partialSpotifyPlaylistUrl ? 'partial Spotify playlist was created' : '',
           chunkFailureSummary,
+          chunkFailureDetail,
+          chunkFailureError,
           chunkRetrySummary,
           skipReasonCounts.length > 0 ? `skip reasons: ${skipReasonCounts.join(', ')}` : '',
         ].filter((part) => part.length > 0);

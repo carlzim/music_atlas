@@ -1016,7 +1016,18 @@ function PlaylistPage() {
       }
 
       if (!response.ok) {
-        throw new Error(data?.error || 'Failed to save playlist to Spotify');
+        const skipReasonCounts = data?.skipReasonCounts && typeof data.skipReasonCounts === 'object'
+          ? Object.entries(data.skipReasonCounts as Record<string, unknown>)
+              .filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value > 0)
+              .map(([reason, value]) => `${reason.replace(/_/g, ' ')} (${Math.floor(value as number)})`)
+          : [];
+        const baseError = typeof data?.error === 'string' && data.error.trim().length > 0
+          ? data.error.trim()
+          : 'Failed to save playlist to Spotify';
+        const detailedError = skipReasonCounts.length > 0
+          ? `${baseError} — skip reasons: ${skipReasonCounts.join(', ')}`
+          : baseError;
+        throw new Error(detailedError);
       }
 
       setSpotifyState('success');

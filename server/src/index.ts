@@ -929,7 +929,20 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   console.log('[spotify-save] first track uris:', dedupedUris.slice(0, 5));
 
   if (matched === 0) {
-    res.status(400).json({ error: 'No Spotify-matched tracks found in this playlist', matched, skipped });
+    res.status(400).json({
+      error: 'No Spotify-matched tracks found in this playlist',
+      matched,
+      skipped,
+      uncertainMatches: uncertainSearchMatches,
+      skipReasonCounts,
+      skippedTracks: skippedTracks.slice(0, 20),
+      matchSources: {
+        trackSpotifyUrl: reusedExistingSpotifyUrls,
+        recordingSpotifyUrl: reusedRecordingSpotifyUrls,
+        isrc: matchedViaIsrc,
+        search: searchedSpotifyMatches,
+      },
+    });
     return;
   }
 

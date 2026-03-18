@@ -207,6 +207,12 @@ function hasAllowedVersionSuffix(baseTitle: string, candidateTitle: string): boo
   return /\b(remaster(?:ed)?|mix|edit|version|mono|stereo|acoustic|instrumental|karaoke|live|session|demo|deluxe|expanded|anniversary|explicit|clean|single|take)\b/.test(compactSuffix);
 }
 
+function isLikelyVariantCandidate(candidate: Pick<SpotifyCandidate, 'title' | 'album_title'>): boolean {
+  const text = normalizeForMatch(`${candidate.title || ''} ${candidate.album_title || ''}`);
+  if (!text) return false;
+  return /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b|\bremaster(?:ed)?\b|\bacoustic\b|\bdemo\b|\binstrumental\b|\bkaraoke\b|\bcover\b|\btribute\b|\bsped\s*up\b|\bslowed\b|\bnightcore\b|\breverb\b|\bversion\b/.test(text);
+}
+
 function getArtistMatchKeys(value: string): Set<string> {
   const display = canonicalizeDisplayName(value);
   const keys = new Set<string>();
@@ -740,6 +746,11 @@ function rankSpotifyCandidates(
 
   ranked.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    const aVariant = isLikelyVariantCandidate(a);
+    const bVariant = isLikelyVariantCandidate(b);
+    if (aVariant !== bVariant) {
+      return aVariant ? 1 : -1;
+    }
     if (b.popularity !== a.popularity) return b.popularity - a.popularity;
     const ay = typeof a.release_year === 'number' ? a.release_year : 0;
     const by = typeof b.release_year === 'number' ? b.release_year : 0;

@@ -659,14 +659,21 @@ export async function searchTrackCandidates(
   const token = await getAccessToken();
   if (!token) return [];
 
+  const safeLimit = Math.max(1, Math.floor(limit));
+  const spotifyFetchLimit = Math.max(10, Math.min(50, safeLimit));
+
   const explicitVenue = extractExplicitVenue(promptContext);
   const artistCacheKey = getArtistCacheKey(artist, song, promptContext);
   if (!artistCacheKey) return [];
 
   let cacheEntry = artistSearchCache.get(artistCacheKey);
   const isExpired = !cacheEntry || Date.now() - cacheEntry.fetchedAt > ARTIST_CACHE_TTL_MS;
+  const needsMoreCandidates = !isExpired
+    && typeof cacheEntry !== 'undefined'
+    && safeLimit > cacheEntry.candidates.length
+    && safeLimit > 10;
 
-  if (isExpired) {
+  if (isExpired || needsMoreCandidates) {
     const safeSong = sanitizeQueryValue(cleanSongTitle(song) || song);
     const safeArtist = sanitizeQueryValue(artist);
     const safeVenue = explicitVenue ? sanitizeQueryValue(explicitVenue) : '';
@@ -682,29 +689,29 @@ export async function searchTrackCandidates(
     const titleOnlyFallbackQuery = safeSong;
 
     try {
-      let result = await searchSpotify(structuredQuery, token, 10);
+      let result = await searchSpotify(structuredQuery, token, spotifyFetchLimit);
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
-        result = await searchSpotify(fallbackQuery, token, 10);
+        result = await searchSpotify(fallbackQuery, token, spotifyFetchLimit);
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort && explicitVenue) {
         const baseStructuredQuery = `track:"${safeSong}" artist:"${safeArtist}"`;
         const baseFallbackQuery = `${safeSong} ${safeArtist}`.trim();
-        result = await searchSpotify(baseStructuredQuery, token, 10);
+        result = await searchSpotify(baseStructuredQuery, token, spotifyFetchLimit);
         if (result.candidates.length === 0 && !result.rateLimitedAbort) {
-          result = await searchSpotify(baseFallbackQuery, token, 10);
+          result = await searchSpotify(baseFallbackQuery, token, spotifyFetchLimit);
         }
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
-        result = await searchSpotify(artistOnlyStructuredQuery, token, 10);
+        result = await searchSpotify(artistOnlyStructuredQuery, token, spotifyFetchLimit);
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
-        result = await searchSpotify(artistOnlyFallbackQuery, token, 10);
+        result = await searchSpotify(artistOnlyFallbackQuery, token, spotifyFetchLimit);
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
-        result = await searchSpotify(titleOnlyStructuredQuery, token, 10);
+        result = await searchSpotify(titleOnlyStructuredQuery, token, spotifyFetchLimit);
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
-        result = await searchSpotify(titleOnlyFallbackQuery, token, 10);
+        result = await searchSpotify(titleOnlyFallbackQuery, token, spotifyFetchLimit);
       }
       cacheEntry = {
         candidates: result.candidates,
@@ -720,7 +727,7 @@ export async function searchTrackCandidates(
   if (!cacheEntry || cacheEntry.rateLimitedAbort) return [];
 
   const ranked = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue, targetDurationMs)
-    .slice(0, Math.max(1, Math.floor(limit)));
+    .slice(0, safeLimit);
 
   const seen = new Set<string>();
   const output: SpotifyTrackCandidateInfo[] = [];

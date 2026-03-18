@@ -229,13 +229,48 @@ function getArtistMatchKeys(value: string): Set<string> {
   return keys;
 }
 
+function splitSpotifyArtistContributors(value: string): { primaryArtist: string; featuredArtists: string[] } {
+  const normalized = canonicalizeDisplayName(value || '').trim();
+  if (!normalized) return { primaryArtist: '', featuredArtists: [] };
+
+  const markerMatch = normalized.match(/^(.*?)\s*(?:,?\s*(?:feat\.?|featuring|ft\.?|duett\s+med|duet\s+with|with)\s+)(.+)$/i);
+  if (!markerMatch) {
+    return { primaryArtist: normalized, featuredArtists: [] };
+  }
+
+  const primaryArtist = canonicalizeDisplayName(markerMatch[1] || '').trim();
+  const featuredArtists = (markerMatch[2] || '')
+    .split(/\s*(?:,|&|\band\b|\bx\b|\+)\s*/i)
+    .map((item) => canonicalizeDisplayName(item))
+    .map((item) => item.replace(/^[-:\s]+/, '').replace(/[.!?,;:]+$/g, '').trim())
+    .filter((item) => item.length > 0)
+    .filter((item) => normalizeForMatch(item) !== normalizeForMatch(primaryArtist));
+
+  return {
+    primaryArtist: primaryArtist || normalized,
+    featuredArtists: Array.from(new Set(featuredArtists.map((item) => canonicalizeDisplayName(item))))
+  };
+}
+
+function getRequestedArtistKeys(artist: string): { primaryArtist: string; keys: Set<string> } {
+  const parsed = splitSpotifyArtistContributors(artist);
+  const primaryArtist = parsed.primaryArtist || artist;
+  const keys = new Set<string>();
+
+  for (const key of getArtistMatchKeys(primaryArtist)) keys.add(key);
+  for (const key of getArtistMatchKeys(artist)) keys.add(key);
+
+  return { primaryArtist, keys };
+}
+
 function validateCandidateMatch(
   artist: string,
   song: string,
   candidate: SpotifyCandidate,
   allowTitleSuffix = false
 ): { ok: boolean; reason?: string } {
-  const requestedArtistKeys = getArtistMatchKeys(artist);
+  const requested = getRequestedArtistKeys(artist);
+  const requestedArtistKeys = requested.keys;
   const candidateArtistKeys = candidate.artists.flatMap((candidateArtist) => Array.from(getArtistMatchKeys(candidateArtist)));
   const artistOk = Array.from(requestedArtistKeys).some((key) => candidateArtistKeys.includes(key));
   if (!artistOk) {
@@ -354,7 +389,9 @@ function scoreSpotifyCandidate(
   targetDurationMs?: number | null
 ): number {
   let score = 0;
-  const requestedArtistKeys = getArtistMatchKeys(artist);
+  const requested = getRequestedArtistKeys(artist);
+  const requestedArtistKeys = requested.keys;
+  const requestedPrimaryArtistKeys = getArtistMatchKeys(requested.primaryArtist);
   const requestedTitle = normalizeTitleKey(song);
   const cleanedRequestedTitle = normalizeTitleKey(cleanSongTitle(song));
   const normalizedRequestedSong = normalizeForMatch(song);
@@ -367,7 +404,7 @@ function scoreSpotifyCandidate(
   const titleAndAlbum = `${candidateTitle} ${albumTitle}`;
 
   const hasAnyArtistMatch = Array.from(requestedArtistKeys).some((key) => candidateArtists.includes(key));
-  const hasPrimaryArtistMatch = Array.from(requestedArtistKeys).some((key) => candidatePrimaryArtistKeys.includes(key));
+  const hasPrimaryArtistMatch = Array.from(requestedPrimaryArtistKeys).some((key) => candidatePrimaryArtistKeys.includes(key));
   if (hasAnyArtistMatch) score += 3;
   if (hasPrimaryArtistMatch) score += 2;
   if (hasAnyArtistMatch && !hasPrimaryArtistMatch && candidate.artists.length >= 4) {
@@ -491,7 +528,8 @@ function scoreSpotifyCandidate(
 function getArtistCacheKey(artist: string, song: string, promptContext = ''): string {
   const explicitVenue = extractExplicitVenue(promptContext) || '';
   const liveFlag = isLiveOrVenuePrompt(promptContext) ? 'live' : 'default';
-  const artistCanonical = buildArtistCanonicalKey(artist) || normalizeForMatch(artist);
+  const requested = getRequestedArtistKeys(artist);
+  const artistCanonical = buildArtistCanonicalKey(requested.primaryArtist) || normalizeForMatch(requested.primaryArtist);
   const titleCanonical = normalizeTitleKey(cleanSongTitle(song) || song);
   return `${artistCanonical}::${titleCanonical}::${normalizeForMatch(explicitVenue)}::${liveFlag}`;
 }
@@ -622,8 +660,11 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
   const isExpired = !cacheEntry || Date.now() - cacheEntry.fetchedAt > ARTIST_CACHE_TTL_MS;
 
   if (isExpired) {
+    const requested = getRequestedArtistKeys(artist);
     const safeSong = sanitizeQueryValue(cleanSongTitle(song) || song);
-    const safeArtist = sanitizeQueryValue(artist);
+    const safeArtist = sanitizeQueryValue(requested.primaryArtist || artist);
+    const safeOriginalArtist = sanitizeQueryValue(artist);
+    const hasDistinctOriginalArtist = safeOriginalArtist.length > 0 && safeOriginalArtist !== safeArtist;
     const safeVenue = explicitVenue ? sanitizeQueryValue(explicitVenue) : '';
     const structuredQuery = safeVenue
       ? `track:"${safeSong}" artist:"${safeArtist}" ${safeVenue}`
@@ -655,11 +696,25 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
           result = await searchSpotify(baseFallbackQuery, token, 10);
         }
       }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctOriginalArtist) {
+        const originalStructuredQuery = `track:"${safeSong}" artist:"${safeOriginalArtist}"`;
+        const originalFallbackQuery = `${safeSong} ${safeOriginalArtist}`.trim();
+        result = await searchSpotify(originalStructuredQuery, token, 10);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(originalFallbackQuery, token, 10);
+        }
+      }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(artistOnlyStructuredQuery, token, 10);
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(artistOnlyFallbackQuery, token, 10);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctOriginalArtist) {
+        result = await searchSpotify(`artist:"${safeOriginalArtist}"`, token, 10);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(safeOriginalArtist, token, 10);
+        }
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(titleOnlyStructuredQuery, token, 10);
@@ -798,8 +853,11 @@ export async function searchTrackCandidates(
     && safeLimit > 10;
 
   if (isExpired || needsMoreCandidates) {
+    const requested = getRequestedArtistKeys(artist);
     const safeSong = sanitizeQueryValue(cleanSongTitle(song) || song);
-    const safeArtist = sanitizeQueryValue(artist);
+    const safeArtist = sanitizeQueryValue(requested.primaryArtist || artist);
+    const safeOriginalArtist = sanitizeQueryValue(artist);
+    const hasDistinctOriginalArtist = safeOriginalArtist.length > 0 && safeOriginalArtist !== safeArtist;
     const safeVenue = explicitVenue ? sanitizeQueryValue(explicitVenue) : '';
     const structuredQuery = safeVenue
       ? `track:"${safeSong}" artist:"${safeArtist}" ${safeVenue}`
@@ -825,11 +883,25 @@ export async function searchTrackCandidates(
           result = await searchSpotify(baseFallbackQuery, token, spotifyFetchLimit);
         }
       }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctOriginalArtist) {
+        const originalStructuredQuery = `track:"${safeSong}" artist:"${safeOriginalArtist}"`;
+        const originalFallbackQuery = `${safeSong} ${safeOriginalArtist}`.trim();
+        result = await searchSpotify(originalStructuredQuery, token, spotifyFetchLimit);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(originalFallbackQuery, token, spotifyFetchLimit);
+        }
+      }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(artistOnlyStructuredQuery, token, spotifyFetchLimit);
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(artistOnlyFallbackQuery, token, spotifyFetchLimit);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && hasDistinctOriginalArtist) {
+        result = await searchSpotify(`artist:"${safeOriginalArtist}"`, token, spotifyFetchLimit);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(safeOriginalArtist, token, spotifyFetchLimit);
+        }
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(titleOnlyStructuredQuery, token, spotifyFetchLimit);

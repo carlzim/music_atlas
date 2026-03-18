@@ -159,6 +159,30 @@ function validateCandidateMatch(
   const requestedTitle = normalizeTitleKey(song);
   const cleanedRequestedTitle = normalizeTitleKey(cleanSongTitle(song));
   const candidateTitle = normalizeTitleKey(candidate.title);
+  const normalizeLooseTitleTokens = (value: string): string[] => {
+    return value
+      .toLowerCase()
+      .replace(/[’']/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/g)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0)
+      .filter((token) => !/^(the|a|an|and|of|pt|part|version|mix|edit|remaster|remastered|live|demo|instrumental|karaoke)$/.test(token));
+  };
+  const hasLooseTitleTokenMatch = (baseTitle: string): boolean => {
+    if (!baseTitle || !candidateTitle) return false;
+    const baseTokens = normalizeLooseTitleTokens(baseTitle);
+    const candidateTokens = normalizeLooseTitleTokens(candidateTitle);
+    if (baseTokens.length < 2 || candidateTokens.length < 2) return false;
+    const baseSet = new Set(baseTokens);
+    const candidateSet = new Set(candidateTokens);
+    let overlap = 0;
+    for (const token of baseSet) {
+      if (candidateSet.has(token)) overlap += 1;
+    }
+    const overlapRatio = overlap / Math.max(baseSet.size, candidateSet.size);
+    return overlapRatio >= 0.75;
+  };
   const hasAllowedVersionSuffix = (baseTitle: string): boolean => {
     if (!baseTitle || candidateTitle.length <= baseTitle.length) return false;
     if (!candidateTitle.startsWith(`${baseTitle} `)) return false;
@@ -178,10 +202,14 @@ function validateCandidateMatch(
   const hasVersionSuffixMatch =
     (requestedTitle.length > 0 && hasAllowedVersionSuffix(requestedTitle))
     || (cleanedRequestedTitle.length > 0 && hasAllowedVersionSuffix(cleanedRequestedTitle));
+  const hasLooseTitleMatch =
+    (requestedTitle.length > 0 && hasLooseTitleTokenMatch(requestedTitle))
+    || (cleanedRequestedTitle.length > 0 && hasLooseTitleTokenMatch(cleanedRequestedTitle));
   const titleOk = candidateTitle === requestedTitle
     || candidateTitle === cleanedRequestedTitle
     || hasRequestedPrefix
-    || hasVersionSuffixMatch;
+    || hasVersionSuffixMatch
+    || hasLooseTitleMatch;
   if (!titleOk) {
     return { ok: false, reason: 'title mismatch' };
   }

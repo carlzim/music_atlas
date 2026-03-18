@@ -263,6 +263,36 @@ function getRequestedArtistKeys(artist: string): { primaryArtist: string; keys: 
   return { primaryArtist, keys };
 }
 
+function toArtistWordTokens(value: string): string[] {
+  return normalizeForMatch(value)
+    .split(/\s+/g)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+function hasLoosePrimaryArtistPrefixMatch(requestedPrimaryArtist: string, candidate: SpotifyCandidate): boolean {
+  const requestedWords = toArtistWordTokens(requestedPrimaryArtist);
+  if (requestedWords.length === 0) return false;
+
+  const candidatePrimaryArtist = candidate.artists.length > 0 ? candidate.artists[0] : '';
+  const candidateWords = toArtistWordTokens(candidatePrimaryArtist);
+  if (candidateWords.length <= requestedWords.length) return false;
+
+  if (requestedWords.length === 1) {
+    const token = requestedWords[0];
+    if (token.length < 4) return false;
+    return candidateWords[0] === token;
+  }
+
+  if (requestedWords.length === 2) {
+    const joinedLength = requestedWords.join('').length;
+    if (joinedLength < 7) return false;
+    return candidateWords[0] === requestedWords[0] && candidateWords[1] === requestedWords[1];
+  }
+
+  return false;
+}
+
 function validateCandidateMatch(
   artist: string,
   song: string,
@@ -272,7 +302,8 @@ function validateCandidateMatch(
   const requested = getRequestedArtistKeys(artist);
   const requestedArtistKeys = requested.keys;
   const candidateArtistKeys = candidate.artists.flatMap((candidateArtist) => Array.from(getArtistMatchKeys(candidateArtist)));
-  const artistOk = Array.from(requestedArtistKeys).some((key) => candidateArtistKeys.includes(key));
+  const artistOk = Array.from(requestedArtistKeys).some((key) => candidateArtistKeys.includes(key))
+    || hasLoosePrimaryArtistPrefixMatch(requested.primaryArtist, candidate);
   if (!artistOk) {
     return { ok: false, reason: 'artist mismatch' };
   }
@@ -405,8 +436,10 @@ function scoreSpotifyCandidate(
 
   const hasAnyArtistMatch = Array.from(requestedArtistKeys).some((key) => candidateArtists.includes(key));
   const hasPrimaryArtistMatch = Array.from(requestedPrimaryArtistKeys).some((key) => candidatePrimaryArtistKeys.includes(key));
+  const hasLoosePrimaryPrefixMatch = hasLoosePrimaryArtistPrefixMatch(requested.primaryArtist, candidate);
   if (hasAnyArtistMatch) score += 3;
   if (hasPrimaryArtistMatch) score += 2;
+  if (!hasPrimaryArtistMatch && hasLoosePrimaryPrefixMatch) score += 1;
   if (hasAnyArtistMatch && !hasPrimaryArtistMatch && candidate.artists.length >= 4) {
     score -= 1;
   }

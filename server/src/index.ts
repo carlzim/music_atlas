@@ -717,6 +717,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     tracksWithArtistDisplay: trackQueries.filter((track) => typeof track.artist_display === 'string' && track.artist_display.trim().length > 0).length,
     featuredArtistFallbackAttempts: 0,
     featuredArtistFallbackMatches: 0,
+    featuredArtistDiagnosticFallbackAttempts: 0,
+    featuredArtistDiagnosticFallbackMatches: 0,
     displayArtistFallbackAttempts: 0,
     displayArtistFallbackMatches: 0,
     searchExactArtistMatches: 0,
@@ -915,6 +917,19 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             .filter((item) => item.length > 0)
         : [];
       const canTryFeaturedArtistFallback = featuredArtists.length > 0;
+      const featuredFallbackArtists = canTryFeaturedArtistFallback
+        ? Array.from(new Set((() => {
+            const featuredNames = featuredArtists.slice(0, 2);
+            const joinedFeatured = featuredNames.join(' & ');
+            return [
+              `${track.artist} feat ${joinedFeatured}`,
+              `${track.artist} featuring ${joinedFeatured}`,
+              `${track.artist} with ${joinedFeatured}`,
+              `${track.artist}, duett med ${joinedFeatured}`,
+              featuredNames.length === 1 ? `${track.artist} feat ${featuredNames[0]}` : '',
+            ].filter((value) => value && value !== track.artist);
+          })()))
+        : [];
       let displayFallbackTried = false;
 
       for (const candidate of candidates) {
@@ -972,16 +987,6 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
       if ((!selectedUrl || !selectedUri) && canTryFeaturedArtistFallback) {
         artistNormalizationStats.featuredArtistFallbackAttempts += 1;
-        const featuredNames = featuredArtists.slice(0, 2);
-        const joinedFeatured = featuredNames.join(' & ');
-        const featuredFallbackArtists = Array.from(new Set([
-          `${track.artist} feat ${joinedFeatured}`,
-          `${track.artist} featuring ${joinedFeatured}`,
-          `${track.artist} with ${joinedFeatured}`,
-          `${track.artist}, duett med ${joinedFeatured}`,
-          featuredNames.length === 1 ? `${track.artist} feat ${featuredNames[0]}` : '',
-        ].filter((value) => value && value !== track.artist)));
-
         let featuredCandidateCountTotal = 0;
         let featuredCandidateCollisionCount = 0;
 
@@ -1070,6 +1075,42 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       }
 
       if (!selectedUrl || !selectedUri) {
+        if ((!selectedUrl || !selectedUri) && featuredFallbackArtists.length > 0) {
+          artistNormalizationStats.featuredArtistDiagnosticFallbackAttempts += 1;
+          for (const featuredFallbackArtist of featuredFallbackArtists) {
+            if (selectedUrl && selectedUri) break;
+            const spotifyInfo = await searchTrackWithDiagnostics(featuredFallbackArtist, track.song, playlist.prompt, recordingDurationMs);
+            if (!spotifyInfo.spotify_url && !spotifyInfo.spotify_uri) {
+              continue;
+            }
+            const fallbackUri = typeof spotifyInfo.spotify_uri === 'string' && spotifyInfo.spotify_uri.trim().length > 0
+              ? spotifyInfo.spotify_uri.trim()
+              : (spotifyInfo.spotify_url ? spotifyUrlToUri(spotifyInfo.spotify_url) : null);
+            const fallbackUrl = spotifyInfo.spotify_url || (fallbackUri ? spotifyUriToUrl(fallbackUri) : null);
+            if (fallbackUri && fallbackUrl && !usedUris.has(fallbackUri)) {
+              selectedUrl = fallbackUrl;
+              selectedUri = fallbackUri;
+              selectedDurationMs = typeof spotifyInfo.duration_ms === 'number' && Number.isFinite(spotifyInfo.duration_ms)
+                ? spotifyInfo.duration_ms
+                : null;
+              selectedScore = typeof spotifyInfo.score === 'number' && Number.isFinite(spotifyInfo.score)
+                ? spotifyInfo.score
+                : null;
+              selectedArtistMatchMode = spotifyInfo.artist_match_mode === 'exact' || spotifyInfo.artist_match_mode === 'prefix' || spotifyInfo.artist_match_mode === 'alias' || spotifyInfo.artist_match_mode === 'other'
+                ? spotifyInfo.artist_match_mode
+                : null;
+              artistNormalizationStats.featuredArtistDiagnosticFallbackMatches += 1;
+              break;
+            }
+            if (fallbackUri && usedUris.has(fallbackUri)) {
+              skipReason = 'fallback_featured_uri_collision';
+            }
+          }
+        }
+
+        if (selectedUrl && selectedUri) {
+          // skip generic diagnostic fallback below when featured diagnostic fallback succeeded
+        } else {
         const spotifyInfo = await searchTrackWithDiagnostics(track.artist, track.song, playlist.prompt, recordingDurationMs);
         if (spotifyInfo.spotify_url || spotifyInfo.spotify_uri) {
           const fallbackUri = typeof spotifyInfo.spotify_uri === 'string' && spotifyInfo.spotify_uri.trim().length > 0
@@ -1093,6 +1134,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           }
         } else {
           skipReason = 'fallback_no_match';
+        }
         }
       }
 
@@ -1192,6 +1234,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   console.log('[spotify-save] searched spotify matches:', searchedSpotifyMatches);
   console.log('[spotify-save] featured-artist fallback attempts:', artistNormalizationStats.featuredArtistFallbackAttempts);
   console.log('[spotify-save] featured-artist fallback matches:', artistNormalizationStats.featuredArtistFallbackMatches);
+  console.log('[spotify-save] featured diagnostic fallback attempts:', artistNormalizationStats.featuredArtistDiagnosticFallbackAttempts);
+  console.log('[spotify-save] featured diagnostic fallback matches:', artistNormalizationStats.featuredArtistDiagnosticFallbackMatches);
   console.log('[spotify-save] display-artist fallback attempts:', artistNormalizationStats.displayArtistFallbackAttempts);
   console.log('[spotify-save] display-artist fallback matches:', artistNormalizationStats.displayArtistFallbackMatches);
   console.log('[spotify-save] uncertain search matches:', uncertainSearchMatches);

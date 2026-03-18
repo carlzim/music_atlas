@@ -6,9 +6,9 @@ import fs from 'fs';
 import path from 'path';
 import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
 import { searchTrack, searchTrackByIsrc, searchTrackCandidateUrls } from './services/spotify.js';
-import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingIsrc, setRecordingSpotifyUrl } from './services/db.js';
+import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUrl } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
-import { resolveMusicBrainzRecordingIsrc } from './services/musicbrainz.js';
+import { resolveMusicBrainzRecordingMetadata } from './services/musicbrainz.js';
 import { backfillTruthCreditsFromDiscogs } from './services/truth-credit-layer.js';
 
 const app = express();
@@ -677,13 +677,18 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     }
 
     let recordingIsrc = getRecordingIsrc(track.artist, track.song);
-    if (!recordingIsrc) {
+    let recordingDurationMs = getRecordingDurationMs(track.artist, track.song);
+    if (!recordingIsrc || !recordingDurationMs) {
       try {
-        const resolvedIsrc = await resolveMusicBrainzRecordingIsrc(track.artist, track.song);
-        if (resolvedIsrc) {
-          recordingIsrc = resolvedIsrc;
-          setRecordingIsrc(track.artist, track.song, resolvedIsrc);
+        const metadata = await resolveMusicBrainzRecordingMetadata(track.artist, track.song);
+        if (metadata.isrc && !recordingIsrc) {
+          recordingIsrc = metadata.isrc;
+          setRecordingIsrc(track.artist, track.song, metadata.isrc);
           discoveredIsrcCount += 1;
+        }
+        if (typeof metadata.durationMs === 'number' && Number.isFinite(metadata.durationMs) && metadata.durationMs > 0 && !recordingDurationMs) {
+          recordingDurationMs = Math.max(0, Math.floor(metadata.durationMs));
+          setRecordingDurationMs(track.artist, track.song, recordingDurationMs);
         }
       } catch (error) {
         console.log('[spotify-save] mb isrc lookup skipped:', { artist: track.artist, song: track.song, error: error instanceof Error ? error.message : String(error) });
@@ -711,7 +716,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     }
 
     try {
-      const candidateUrls = await searchTrackCandidateUrls(track.artist, track.song, playlist.prompt, 6);
+      const candidateUrls = await searchTrackCandidateUrls(track.artist, track.song, playlist.prompt, 6, recordingDurationMs);
       let selectedUrl: string | null = null;
       let selectedUri: string | null = null;
 
@@ -725,7 +730,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       }
 
       if (!selectedUrl || !selectedUri) {
-        const spotifyInfo = await searchTrack(track.artist, track.song, playlist.prompt);
+        const spotifyInfo = await searchTrack(track.artist, track.song, playlist.prompt, recordingDurationMs);
         if (spotifyInfo.spotify_url) {
           const fallbackUri = spotifyUrlToUri(spotifyInfo.spotify_url);
           if (fallbackUri && !usedUris.has(fallbackUri)) {

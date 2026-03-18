@@ -298,7 +298,8 @@ function scoreSpotifyCandidate(
   candidate: SpotifyCandidate,
   promptAlbumTokens: Set<string>,
   livePrompt: boolean,
-  explicitVenue: string | null
+  explicitVenue: string | null,
+  targetDurationMs?: number | null
 ): number {
   let score = 0;
   const requestedArtistKeys = getArtistMatchKeys(artist);
@@ -356,6 +357,19 @@ function scoreSpotifyCandidate(
   if (!livePrompt) {
     const archiveStyleRegex = /\bdeluxe\b|\bexpanded\b|\banniversary\b|\bremaster(?:ed)?\b/;
     if (archiveStyleRegex.test(titleAndAlbum)) {
+      score -= 1;
+    }
+  }
+
+  if (typeof targetDurationMs === 'number' && Number.isFinite(targetDurationMs) && targetDurationMs > 0 && typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms) && candidate.duration_ms > 0) {
+    const deltaMs = Math.abs(candidate.duration_ms - targetDurationMs);
+    if (deltaMs <= 2500) {
+      score += 2;
+    } else if (deltaMs <= 6000) {
+      score += 1;
+    } else if (deltaMs >= 25000) {
+      score -= 2;
+    } else if (deltaMs >= 12000) {
       score -= 1;
     }
   }
@@ -477,7 +491,7 @@ async function searchSpotify(query: string, token: string, limit = 5): Promise<S
   return { candidates: [], rateLimitedAbort: false };
 }
 
-async function searchTrackInternal(artist: string, song: string, promptContext = ''): Promise<SpotifyTrackDebugInfo> {
+async function searchTrackInternal(artist: string, song: string, promptContext = '', targetDurationMs?: number | null): Promise<SpotifyTrackDebugInfo> {
   console.log(`[Spotify] Searching for: "${song}" by "${artist}"`);
   
   const token = await getAccessToken();
@@ -551,7 +565,7 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
     return { spotify_url: null, album_image_url: null, release_year: null, score: null, matchedTitle: null, matchedAlbumTitle: null };
   }
 
-  const rankedCandidates = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue);
+  const rankedCandidates = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue, targetDurationMs);
   const bestCandidate = rankedCandidates[0] || null;
 
   if (bestCandidate) {
@@ -575,7 +589,8 @@ function rankSpotifyCandidates(
   song: string,
   promptContext: string,
   candidates: SpotifyCandidate[],
-  explicitVenue: string | null
+  explicitVenue: string | null,
+  targetDurationMs?: number | null
 ): RankedSpotifyCandidate[] {
   const promptAlbumTokens = getPromptAlbumTokens(promptContext);
   const livePrompt = isLiveOrVenuePrompt(promptContext);
@@ -585,7 +600,7 @@ function rankSpotifyCandidates(
   for (const candidate of candidates) {
     const validation = validateCandidateMatch(artist, song, candidate, allowTitleSuffix);
     if (!validation.ok) continue;
-    const score = scoreSpotifyCandidate(artist, song, candidate, promptAlbumTokens, livePrompt, explicitVenue);
+    const score = scoreSpotifyCandidate(artist, song, candidate, promptAlbumTokens, livePrompt, explicitVenue, targetDurationMs);
     ranked.push({ ...candidate, score });
   }
 
@@ -604,7 +619,8 @@ export async function searchTrackCandidateUrls(
   artist: string,
   song: string,
   promptContext = '',
-  limit = 5
+  limit = 5,
+  targetDurationMs?: number | null
 ): Promise<string[]> {
   const token = await getAccessToken();
   if (!token) return [];
@@ -661,7 +677,7 @@ export async function searchTrackCandidateUrls(
 
   if (!cacheEntry || cacheEntry.rateLimitedAbort) return [];
 
-  const ranked = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue)
+  const ranked = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue, targetDurationMs)
     .slice(0, Math.max(1, Math.floor(limit)))
     .map((item) => item.spotify_url)
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
@@ -669,8 +685,8 @@ export async function searchTrackCandidateUrls(
   return Array.from(new Set(ranked));
 }
 
-export async function searchTrack(artist: string, song: string, promptContext = ''): Promise<SpotifyTrackInfo> {
-  const result = await searchTrackInternal(artist, song, promptContext);
+export async function searchTrack(artist: string, song: string, promptContext = '', targetDurationMs?: number | null): Promise<SpotifyTrackInfo> {
+  const result = await searchTrackInternal(artist, song, promptContext, targetDurationMs);
   return {
     spotify_url: result.spotify_url,
     album_image_url: result.album_image_url,
@@ -681,9 +697,10 @@ export async function searchTrack(artist: string, song: string, promptContext = 
 export async function searchTrackWithDiagnostics(
   artist: string,
   song: string,
-  promptContext = ''
+  promptContext = '',
+  targetDurationMs?: number | null
 ): Promise<SpotifyTrackDebugInfo> {
-  return searchTrackInternal(artist, song, promptContext);
+  return searchTrackInternal(artist, song, promptContext, targetDurationMs);
 }
 
 export async function searchTrackByIsrc(isrc: string): Promise<SpotifyTrackInfo> {

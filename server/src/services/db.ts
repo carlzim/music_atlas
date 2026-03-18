@@ -42,6 +42,7 @@ db.exec(`
     canonical_key TEXT UNIQUE NOT NULL,
     isrc TEXT,
     spotify_url TEXT,
+    duration_ms INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `);
@@ -220,6 +221,7 @@ if (!hasPersonCanonicalColumn) {
 const recordingsColumns = db.prepare('PRAGMA table_info(recordings)').all() as Array<{ name: string }>;
 const hasRecordingIsrcColumn = recordingsColumns.some((column) => column.name === 'isrc');
 const hasRecordingSpotifyUrlColumn = recordingsColumns.some((column) => column.name === 'spotify_url');
+const hasRecordingDurationMsColumn = recordingsColumns.some((column) => column.name === 'duration_ms');
 
 if (!hasRecordingIsrcColumn) {
   db.exec('ALTER TABLE recordings ADD COLUMN isrc TEXT');
@@ -227,6 +229,10 @@ if (!hasRecordingIsrcColumn) {
 
 if (!hasRecordingSpotifyUrlColumn) {
   db.exec('ALTER TABLE recordings ADD COLUMN spotify_url TEXT');
+}
+
+if (!hasRecordingDurationMsColumn) {
+  db.exec('ALTER TABLE recordings ADD COLUMN duration_ms INTEGER');
 }
 
 db.exec(`
@@ -3243,6 +3249,30 @@ export function setRecordingSpotifyUrl(artist: string, title: string, spotifyUrl
   const recordingId = ensureRecordingId(artist, title);
   if (!recordingId) return;
   db.prepare('UPDATE recordings SET spotify_url = ? WHERE id = ?').run(value, recordingId);
+}
+
+export function getRecordingDurationMs(artist: string, title: string): number | null {
+  const canonicalKey = buildRecordingCanonicalKey(artist, title);
+  if (!canonicalKey) return null;
+  try {
+    const row = db.prepare('SELECT duration_ms FROM recordings WHERE canonical_key = ? LIMIT 1').get(canonicalKey) as { duration_ms: number | null } | undefined;
+    const value = typeof row?.duration_ms === 'number' && Number.isFinite(row.duration_ms)
+      ? Math.max(0, Math.floor(row.duration_ms))
+      : 0;
+    return value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setRecordingDurationMs(artist: string, title: string, durationMs: number): void {
+  const parsed = Number(durationMs);
+  if (!Number.isFinite(parsed)) return;
+  const value = Math.max(0, Math.floor(parsed));
+  if (value <= 0) return;
+  const recordingId = ensureRecordingId(artist, title);
+  if (!recordingId) return;
+  db.prepare('UPDATE recordings SET duration_ms = ? WHERE id = ?').run(value, recordingId);
 }
 
 export function hasRecordingStudioEvidence(

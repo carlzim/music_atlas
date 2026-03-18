@@ -2469,6 +2469,53 @@ function refineCreditTrackReasons(tracks: Track[], constraint: PromptConstraint 
   });
 }
 
+function normalizeReasonForComparison(reason: string): string {
+  return reason
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function refineGeneralTrackReasons(tracks: Track[]): Track[] {
+  if (tracks.length < 2) return tracks;
+
+  const reasonCounts = new Map<string, number>();
+  for (const track of tracks) {
+    const normalized = normalizeReasonForComparison(track.reason || '');
+    if (!normalized) continue;
+    reasonCounts.set(normalized, (reasonCounts.get(normalized) || 0) + 1);
+  }
+
+  const variantPhrases = [
+    'keeps the playlist moving with a distinct tonal angle',
+    'adds contrast while staying aligned with the request',
+    'reinforces the core vibe with a different texture',
+    'supports flow by widening the sonic perspective',
+  ];
+
+  return tracks.map((track, index) => {
+    const reason = (track.reason || '').trim();
+    const normalized = normalizeReasonForComparison(reason);
+    const duplicateCount = normalized ? (reasonCounts.get(normalized) || 0) : 0;
+    if (duplicateCount <= 1) {
+      return track;
+    }
+
+    const hashSeed = `${normalize(track.artist)}::${normalize(track.song)}::${index}`;
+    let hash = 0;
+    for (let i = 0; i < hashSeed.length; i += 1) {
+      hash = (hash * 33 + hashSeed.charCodeAt(i)) >>> 0;
+    }
+    const phrase = variantPhrases[hash % variantPhrases.length];
+
+    return {
+      ...track,
+      reason: `${track.song} by ${track.artist} ${phrase}.`,
+    };
+  });
+}
+
 function getMinimumVerifiedTracksForCreditConstraint(constraint: PromptConstraint | null): number {
   if (!constraint || constraint.kind !== 'credit') return 8;
 
@@ -3206,6 +3253,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   }
   if (playlist.tracks.length > MAX_PLAYLIST_TRACKS) {
     playlist.tracks = playlist.tracks.slice(0, MAX_PLAYLIST_TRACKS);
+  }
+  if (!constraint || constraint.kind !== 'credit') {
+    playlist.tracks = refineGeneralTrackReasons(playlist.tracks);
   }
 
   if (playlist.tracks.length === 0) {

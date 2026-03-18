@@ -30,6 +30,10 @@ interface SpotifySearchResult {
   rateLimitedAbort: boolean;
 }
 
+interface RankedSpotifyCandidate extends SpotifyCandidate {
+  score: number;
+}
+
 interface ArtistSearchCacheEntry {
   candidates: SpotifyCandidate[];
   rateLimitedAbort: boolean;
@@ -547,30 +551,16 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
     return { spotify_url: null, album_image_url: null, release_year: null, score: null, matchedTitle: null, matchedAlbumTitle: null };
   }
 
-  const promptAlbumTokens = getPromptAlbumTokens(promptContext);
-  const livePrompt = isLiveOrVenuePrompt(promptContext);
-  const allowTitleSuffix = Boolean(explicitVenue);
-  let bestCandidate: SpotifyCandidate | null = null;
-  let bestScore = Number.NEGATIVE_INFINITY;
-
-  for (const candidate of cacheEntry.candidates) {
-    const validation = validateCandidateMatch(artist, song, candidate, allowTitleSuffix);
-    if (!validation.ok) continue;
-
-    const score = scoreSpotifyCandidate(artist, song, candidate, promptAlbumTokens, livePrompt, explicitVenue);
-    if (score > bestScore) {
-      bestScore = score;
-      bestCandidate = candidate;
-    }
-  }
+  const rankedCandidates = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue);
+  const bestCandidate = rankedCandidates[0] || null;
 
   if (bestCandidate) {
-    console.log(`[Spotify] Found match: "${song}" by "${artist}" (score=${bestScore})`);
+    console.log(`[Spotify] Found match: "${song}" by "${artist}" (score=${bestCandidate.score})`);
     return {
       spotify_url: bestCandidate.spotify_url,
       album_image_url: bestCandidate.album_image_url,
       release_year: bestCandidate.release_year,
-      score: bestScore,
+      score: bestCandidate.score,
       matchedTitle: bestCandidate.title || null,
       matchedAlbumTitle: bestCandidate.album_title || null,
     };
@@ -578,6 +568,105 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
 
   console.log('[Spotify] No match found');
   return { spotify_url: null, album_image_url: null, release_year: null, score: null, matchedTitle: null, matchedAlbumTitle: null };
+}
+
+function rankSpotifyCandidates(
+  artist: string,
+  song: string,
+  promptContext: string,
+  candidates: SpotifyCandidate[],
+  explicitVenue: string | null
+): RankedSpotifyCandidate[] {
+  const promptAlbumTokens = getPromptAlbumTokens(promptContext);
+  const livePrompt = isLiveOrVenuePrompt(promptContext);
+  const allowTitleSuffix = Boolean(explicitVenue);
+
+  const ranked: RankedSpotifyCandidate[] = [];
+  for (const candidate of candidates) {
+    const validation = validateCandidateMatch(artist, song, candidate, allowTitleSuffix);
+    if (!validation.ok) continue;
+    const score = scoreSpotifyCandidate(artist, song, candidate, promptAlbumTokens, livePrompt, explicitVenue);
+    ranked.push({ ...candidate, score });
+  }
+
+  ranked.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.popularity !== a.popularity) return b.popularity - a.popularity;
+    const ay = typeof a.release_year === 'number' ? a.release_year : 0;
+    const by = typeof b.release_year === 'number' ? b.release_year : 0;
+    return by - ay;
+  });
+
+  return ranked;
+}
+
+export async function searchTrackCandidateUrls(
+  artist: string,
+  song: string,
+  promptContext = '',
+  limit = 5
+): Promise<string[]> {
+  const token = await getAccessToken();
+  if (!token) return [];
+
+  const explicitVenue = extractExplicitVenue(promptContext);
+  const artistCacheKey = getArtistCacheKey(artist, song, promptContext);
+  if (!artistCacheKey) return [];
+
+  let cacheEntry = artistSearchCache.get(artistCacheKey);
+  const isExpired = !cacheEntry || Date.now() - cacheEntry.fetchedAt > ARTIST_CACHE_TTL_MS;
+
+  if (isExpired) {
+    const safeSong = sanitizeQueryValue(cleanSongTitle(song) || song);
+    const safeArtist = sanitizeQueryValue(artist);
+    const safeVenue = explicitVenue ? sanitizeQueryValue(explicitVenue) : '';
+    const structuredQuery = safeVenue
+      ? `track:"${safeSong}" artist:"${safeArtist}" ${safeVenue}`
+      : `track:"${safeSong}" artist:"${safeArtist}"`;
+    const fallbackQuery = safeVenue
+      ? `${safeSong} ${safeArtist} ${safeVenue}`.trim()
+      : `${safeSong} ${safeArtist}`.trim();
+    const titleOnlyStructuredQuery = `track:"${safeSong}"`;
+    const titleOnlyFallbackQuery = safeSong;
+
+    try {
+      let result = await searchSpotify(structuredQuery, token, 10);
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(fallbackQuery, token, 10);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && explicitVenue) {
+        const baseStructuredQuery = `track:"${safeSong}" artist:"${safeArtist}"`;
+        const baseFallbackQuery = `${safeSong} ${safeArtist}`.trim();
+        result = await searchSpotify(baseStructuredQuery, token, 10);
+        if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+          result = await searchSpotify(baseFallbackQuery, token, 10);
+        }
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(titleOnlyStructuredQuery, token, 10);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(titleOnlyFallbackQuery, token, 10);
+      }
+      cacheEntry = {
+        candidates: result.candidates,
+        rateLimitedAbort: result.rateLimitedAbort,
+        fetchedAt: Date.now(),
+      };
+      artistSearchCache.set(artistCacheKey, cacheEntry);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!cacheEntry || cacheEntry.rateLimitedAbort) return [];
+
+  const ranked = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue)
+    .slice(0, Math.max(1, Math.floor(limit)))
+    .map((item) => item.spotify_url)
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+  return Array.from(new Set(ranked));
 }
 
 export async function searchTrack(artist: string, song: string, promptContext = ''): Promise<SpotifyTrackInfo> {

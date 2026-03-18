@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
-import { searchTrack, searchTrackByIsrc } from './services/spotify.js';
+import { searchTrack, searchTrackByIsrc, searchTrackCandidateUrls } from './services/spotify.js';
 import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingIsrc, setRecordingSpotifyUrl } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
 import { resolveMusicBrainzRecordingIsrc } from './services/musicbrainz.js';
@@ -645,6 +645,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   );
 
   const uris: string[] = [];
+  const usedUris = new Set<string>();
   let matchedTrackCount = 0;
   const skippedTracks: Array<{ artist: string; song: string }> = [];
   let reusedExistingSpotifyUrls = 0;
@@ -655,8 +656,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   for (const track of trackQueries) {
     let matchedCurrentTrack = false;
     const existingUri = typeof track.spotify_url === 'string' ? spotifyUrlToUri(track.spotify_url) : null;
-    if (existingUri) {
+    if (existingUri && !usedUris.has(existingUri)) {
       uris.push(existingUri);
+      usedUris.add(existingUri);
       reusedExistingSpotifyUrls += 1;
       matchedCurrentTrack = true;
       matchedTrackCount += 1;
@@ -665,8 +667,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
     const storedSpotifyUrl = getRecordingSpotifyUrl(track.artist, track.song);
     const storedUri = storedSpotifyUrl ? spotifyUrlToUri(storedSpotifyUrl) : null;
-    if (storedUri) {
+    if (storedUri && !usedUris.has(storedUri)) {
       uris.push(storedUri);
+      usedUris.add(storedUri);
       reusedRecordingSpotifyUrls += 1;
       matchedCurrentTrack = true;
       matchedTrackCount += 1;
@@ -692,8 +695,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         const spotifyByIsrc = await searchTrackByIsrc(recordingIsrc);
         if (spotifyByIsrc.spotify_url) {
           const uri = spotifyUrlToUri(spotifyByIsrc.spotify_url);
-          if (uri) {
+          if (uri && !usedUris.has(uri)) {
             uris.push(uri);
+            usedUris.add(uri);
             matchedViaIsrc += 1;
             setRecordingSpotifyUrl(track.artist, track.song, spotifyByIsrc.spotify_url);
             matchedCurrentTrack = true;
@@ -707,13 +711,35 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     }
 
     try {
-      const spotifyInfo = await searchTrack(track.artist, track.song, playlist.prompt);
-      if (!spotifyInfo.spotify_url) continue;
-      const uri = spotifyUrlToUri(spotifyInfo.spotify_url);
-      if (uri) {
-        uris.push(uri);
+      const candidateUrls = await searchTrackCandidateUrls(track.artist, track.song, playlist.prompt, 6);
+      let selectedUrl: string | null = null;
+      let selectedUri: string | null = null;
+
+      for (const candidateUrl of candidateUrls) {
+        const candidateUri = spotifyUrlToUri(candidateUrl);
+        if (!candidateUri) continue;
+        if (usedUris.has(candidateUri)) continue;
+        selectedUrl = candidateUrl;
+        selectedUri = candidateUri;
+        break;
+      }
+
+      if (!selectedUrl || !selectedUri) {
+        const spotifyInfo = await searchTrack(track.artist, track.song, playlist.prompt);
+        if (spotifyInfo.spotify_url) {
+          const fallbackUri = spotifyUrlToUri(spotifyInfo.spotify_url);
+          if (fallbackUri && !usedUris.has(fallbackUri)) {
+            selectedUrl = spotifyInfo.spotify_url;
+            selectedUri = fallbackUri;
+          }
+        }
+      }
+
+      if (selectedUrl && selectedUri) {
+        uris.push(selectedUri);
+        usedUris.add(selectedUri);
         searchedSpotifyMatches += 1;
-        setRecordingSpotifyUrl(track.artist, track.song, spotifyInfo.spotify_url);
+        setRecordingSpotifyUrl(track.artist, track.song, selectedUrl);
         matchedCurrentTrack = true;
         matchedTrackCount += 1;
       }

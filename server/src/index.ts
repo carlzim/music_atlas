@@ -6,7 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
 import { searchTrack, searchTrackByIsrc, searchTrackCandidateUrls } from './services/spotify.js';
-import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUrl } from './services/db.js';
+import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUrl, updatePlaylistTrackSpotifyUrls } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
 import { resolveMusicBrainzRecordingMetadata } from './services/musicbrainz.js';
 import { backfillTruthCreditsFromDiscogs } from './services/truth-credit-layer.js';
@@ -646,6 +646,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
   const uris: string[] = [];
   const usedUris = new Set<string>();
+  const playlistTrackSpotifyUpdates: Array<{ artist: string; song: string; spotifyUrl: string }> = [];
   let matchedTrackCount = 0;
   const skippedTracks: Array<{ artist: string; song: string }> = [];
   let reusedExistingSpotifyUrls = 0;
@@ -660,6 +661,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       uris.push(existingUri);
       usedUris.add(existingUri);
       reusedExistingSpotifyUrls += 1;
+      if (typeof track.spotify_url === 'string' && track.spotify_url.trim().length > 0) {
+        playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: track.spotify_url.trim() });
+      }
       matchedCurrentTrack = true;
       matchedTrackCount += 1;
       continue;
@@ -671,6 +675,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       uris.push(storedUri);
       usedUris.add(storedUri);
       reusedRecordingSpotifyUrls += 1;
+      if (storedSpotifyUrl) {
+        playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: storedSpotifyUrl });
+      }
       matchedCurrentTrack = true;
       matchedTrackCount += 1;
       continue;
@@ -704,7 +711,10 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             uris.push(uri);
             usedUris.add(uri);
             matchedViaIsrc += 1;
-            setRecordingSpotifyUrl(track.artist, track.song, spotifyByIsrc.spotify_url);
+            if (spotifyByIsrc.spotify_url) {
+              setRecordingSpotifyUrl(track.artist, track.song, spotifyByIsrc.spotify_url);
+              playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: spotifyByIsrc.spotify_url });
+            }
             matchedCurrentTrack = true;
             matchedTrackCount += 1;
             continue;
@@ -745,6 +755,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         usedUris.add(selectedUri);
         searchedSpotifyMatches += 1;
         setRecordingSpotifyUrl(track.artist, track.song, selectedUrl);
+        playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: selectedUrl });
         matchedCurrentTrack = true;
         matchedTrackCount += 1;
       }
@@ -860,6 +871,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       res.status(500).json({ error: 'Playlist created, but failed to add tracks' });
       return;
     }
+
+    const persistedTrackSpotifyUrls = updatePlaylistTrackSpotifyUrls(id, playlistTrackSpotifyUpdates);
+    console.log('[spotify-save] persisted spotify urls on playlist tracks:', persistedTrackSpotifyUrls);
 
     res.json({
       success: true,

@@ -1250,6 +1250,67 @@ export function getPlaylistById(id: number): PlaylistRow | undefined {
   return stmt.get(id) as PlaylistRow | undefined;
 }
 
+export function updatePlaylistTrackSpotifyUrls(
+  playlistId: number,
+  updates: Array<{ artist: string; song: string; spotifyUrl: string }>
+): number {
+  if (!Number.isFinite(playlistId) || playlistId <= 0 || updates.length === 0) return 0;
+
+  const row = getPlaylistById(playlistId);
+  if (!row?.tracks) return 0;
+
+  let parsedTracks: unknown;
+  try {
+    parsedTracks = JSON.parse(row.tracks);
+  } catch {
+    return 0;
+  }
+  if (!Array.isArray(parsedTracks)) return 0;
+
+  const urlByRecordingKey = new Map<string, string>();
+  for (const item of updates) {
+    const artist = canonicalizeDisplayName(item.artist || '');
+    const title = String(item.song || '').trim();
+    const spotifyUrl = String(item.spotifyUrl || '').trim();
+    const key = buildRecordingCanonicalKey(artist, title);
+    if (!key || !spotifyUrl) continue;
+    urlByRecordingKey.set(key, spotifyUrl);
+  }
+
+  if (urlByRecordingKey.size === 0) return 0;
+
+  let updatedCount = 0;
+  const nextTracks = parsedTracks.map((track) => {
+    if (!track || typeof track !== 'object') return track;
+    const artist = typeof (track as { artist?: unknown }).artist === 'string'
+      ? canonicalizeDisplayName((track as { artist: string }).artist)
+      : '';
+    const song = typeof (track as { song?: unknown }).song === 'string'
+      ? (track as { song: string }).song.trim()
+      : '';
+    const key = buildRecordingCanonicalKey(artist, song);
+    if (!key) return track;
+    const spotifyUrl = urlByRecordingKey.get(key);
+    if (!spotifyUrl) return track;
+
+    const current = typeof (track as { spotify_url?: unknown }).spotify_url === 'string'
+      ? (track as { spotify_url: string }).spotify_url.trim()
+      : '';
+    if (current === spotifyUrl) return track;
+    updatedCount += 1;
+    return {
+      ...track,
+      spotify_url: spotifyUrl,
+    };
+  });
+
+  if (updatedCount > 0) {
+    db.prepare('UPDATE playlists SET tracks = ? WHERE id = ?').run(JSON.stringify(nextTracks), playlistId);
+  }
+
+  return updatedCount;
+}
+
 export function getRelatedPlaylists(playlistId: number): Omit<PlaylistRow, 'tracks'>[] {
   const current = getPlaylistById(playlistId);
   if (!current || !current.tags) return [];

@@ -912,6 +912,7 @@ function PlaylistPage() {
       totalAttempts?: number;
       retriedChunks?: number;
       retryDelayTotalMs?: number;
+      retryDelayAverageMs?: number;
       retryAfterRetries?: number;
       backoffRetries?: number;
       requestTimeoutMs?: number;
@@ -1085,6 +1086,7 @@ function PlaylistPage() {
             totalAttempts?: number;
             retriedChunks?: number;
             retryDelayTotalMs?: number;
+            retryDelayAverageMs?: number;
             retryAfterRetries?: number;
             backoffRetries?: number;
             requestTimeoutMs?: number;
@@ -1180,11 +1182,18 @@ function PlaylistPage() {
         const chunkFailureTransient = typeof data?.failedChunkTransient === 'boolean'
           ? `chunk transient: ${data.failedChunkTransient ? 'yes' : 'no'}`
           : '';
+        const chunkRetryDelayAverageMs = (
+          typeof data?.addTracksChunkStats === 'object'
+          && data.addTracksChunkStats !== null
+          && typeof (data.addTracksChunkStats as { retryDelayAverageMs?: unknown }).retryDelayAverageMs === 'number'
+        )
+          ? Math.max(0, Math.floor((data.addTracksChunkStats as { retryDelayAverageMs: number }).retryDelayAverageMs))
+          : null;
         const chunkRetrySummary = (
           typeof data?.addTracksAttemptsTotal === 'number'
           && typeof data?.addTracksChunksRetried === 'number'
         )
-          ? `chunk attempts ${Math.max(0, Math.floor(data.addTracksAttemptsTotal))}, retries ${Math.max(0, Math.floor(data.addTracksChunksRetried))}`
+          ? `chunk attempts ${Math.max(0, Math.floor(data.addTracksAttemptsTotal))}, retries ${Math.max(0, Math.floor(data.addTracksChunksRetried))}${chunkRetryDelayAverageMs !== null ? `, retry delay avg ${chunkRetryDelayAverageMs}ms` : ''}`
           : '';
         const baseError = typeof data?.error === 'string' && data.error.trim().length > 0
           ? data.error.trim()
@@ -1337,6 +1346,7 @@ function PlaylistPage() {
                 {' '}attempts: {spotifyMatchDetails.addTracksChunkStats.totalAttempts ?? 0},
                 {' '}retries: {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0},
                 {' '}retry delay total: {spotifyMatchDetails.addTracksChunkStats.retryDelayTotalMs ?? 0}ms,
+                {' '}retry delay avg: {spotifyMatchDetails.addTracksChunkStats.retryDelayAverageMs ?? 0}ms,
                 {' '}retry-after retries: {spotifyMatchDetails.addTracksChunkStats.retryAfterRetries ?? 0},
                 {' '}backoff retries: {spotifyMatchDetails.addTracksChunkStats.backoffRetries ?? 0},
                 {' '}request timeout: {spotifyMatchDetails.addTracksChunkStats.requestTimeoutMs ?? 0}ms,

@@ -44,6 +44,8 @@ interface RankedSpotifyCandidate extends SpotifyCandidate {
   artist_match_mode: 'exact' | 'prefix' | 'alias' | 'other';
 }
 
+type VariantSelectionBucket = 'canonical' | 'fallback_live' | 'avoid';
+
 function getArtistMatchModeRank(mode: RankedSpotifyCandidate['artist_match_mode']): number {
   switch (mode) {
     case 'exact': return 4;
@@ -445,6 +447,35 @@ function isLiveOrVenuePrompt(promptContext: string): boolean {
   return /\blive\b|\bvenue\b|\bconcert\b|\bperformance\b|\bshow\b|\btour\b|\bhollywood bowl\b|\bcbgb\b|\bhall\b|\barena\b|\btheatre\b|\btheater\b/.test(text);
 }
 
+function classifyVariantSelectionBucket(
+  candidate: Pick<SpotifyCandidate, 'title' | 'album_title'>,
+  options: {
+    livePrompt: boolean;
+    explicitVenue: string | null;
+    allowsRemixVariants: boolean;
+    allowsSoundtrackVariants: boolean;
+  }
+): VariantSelectionBucket {
+  const titleAndAlbum = normalizeForMatch(`${candidate.title || ''} ${candidate.album_title || ''}`);
+  if (!titleAndAlbum) return 'canonical';
+
+  const isSoundtrackVariant = /\bsoundtrack\b|\bost\b|\boriginal\s+motion\s+picture\b|\bmotion\s+picture\b|\boriginal\s+score\b|\bfilm\s+version\b|\bfrom\s+the\s+.*soundtrack\b|\bmusic\s+from\b/.test(titleAndAlbum);
+  const isRemixVariant = /\bremix(?:es)?\b|\brework\b|\bmashup\b|\bflip\b/.test(titleAndAlbum);
+  const isLiveVariant = /\blive\b|\bin\s+concert\b|\blive\s+at\b|\blive\s+in\b/.test(titleAndAlbum);
+
+  if (isSoundtrackVariant && !options.allowsSoundtrackVariants) {
+    return 'avoid';
+  }
+  if (isRemixVariant && !options.allowsRemixVariants) {
+    return 'avoid';
+  }
+  if (isLiveVariant && !options.livePrompt && !options.explicitVenue) {
+    return 'fallback_live';
+  }
+
+  return 'canonical';
+}
+
 function normalizeVenueText(value: string): string {
   return value
     .toLowerCase()
@@ -507,6 +538,7 @@ function scoreSpotifyCandidate(
   allowsCoversOrTributes: boolean,
   allowsSpeedVariants: boolean,
   allowsRemixVariants: boolean,
+  allowsSoundtrackVariants: boolean,
   targetDurationMs?: number | null
 ): number {
   let score = 0;
@@ -622,7 +654,14 @@ function scoreSpotifyCandidate(
   if (!allowsRemixVariants) {
     const remixVariantRegex = /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/;
     if (remixVariantRegex.test(titleAndAlbum)) {
-      score -= 1;
+      score -= 3;
+    }
+  }
+
+  if (!allowsSoundtrackVariants) {
+    const soundtrackVariantRegex = /\bsoundtrack\b|\bost\b|\boriginal\s+motion\s+picture\b|\bmotion\s+picture\b|\boriginal\s+score\b|\bfilm\s+version\b|\bfrom\s+the\s+.*soundtrack\b|\bmusic\s+from\b/;
+    if (soundtrackVariantRegex.test(titleAndAlbum)) {
+      score -= 6;
     }
   }
 
@@ -987,6 +1026,7 @@ function rankSpotifyCandidates(
   const allowsSpeedVariants = /\bsped\s*up\b|\bslowed\b|\bnightcore\b|\bchopped\s*and\s*screwed\b|\breverb\b|\b8d\b/.test(normalizedPromptContext);
   const allowsRemixVariants = /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/.test(normalizedPromptContext)
     || /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/.test(normalizedRequestedSong);
+  const allowsSoundtrackVariants = /\bsoundtrack\b|\bost\b|\bfilm\b|\bmovie\b|\bmotion\s+picture\b|\bscore\b/.test(normalizedPromptContext);
   const allowTitleSuffix = Boolean(explicitVenue);
   const requested = getRequestedArtistKeys(artist);
   const requestedPrimaryArtistKeys = getArtistMatchKeys(requested.primaryArtist);
@@ -1019,6 +1059,7 @@ function rankSpotifyCandidates(
       allowsCoversOrTributes,
       allowsSpeedVariants,
       allowsRemixVariants,
+      allowsSoundtrackVariants,
       targetDurationMs
     );
     ranked.push({ ...candidate, score, artist_match_mode: artistMatchMode });
@@ -1039,7 +1080,27 @@ function rankSpotifyCandidates(
     return by - ay;
   });
 
-  return ranked;
+  const canonical: RankedSpotifyCandidate[] = [];
+  const fallbackLive: RankedSpotifyCandidate[] = [];
+  const avoid: RankedSpotifyCandidate[] = [];
+
+  for (const candidate of ranked) {
+    const bucket = classifyVariantSelectionBucket(candidate, {
+      livePrompt,
+      explicitVenue,
+      allowsRemixVariants,
+      allowsSoundtrackVariants,
+    });
+    if (bucket === 'canonical') {
+      canonical.push(candidate);
+    } else if (bucket === 'fallback_live') {
+      fallbackLive.push(candidate);
+    } else {
+      avoid.push(candidate);
+    }
+  }
+
+  return [...canonical, ...fallbackLive, ...avoid];
 }
 
 export async function searchTrackCandidateUrls(

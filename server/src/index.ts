@@ -1045,6 +1045,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
     let addedToSpotifyCount = 0;
     const ADD_TRACKS_MAX_ATTEMPTS = 3;
+    let addTracksAttemptsTotal = 0;
+    let addTracksChunksRetried = 0;
     for (let chunkIndex = 0; chunkIndex < uriChunks.length; chunkIndex += 1) {
       const chunk = uriChunks[chunkIndex];
       const addTracksBody = { uris: chunk };
@@ -1052,6 +1054,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
       let chunkAdded = false;
       for (let attempt = 1; attempt <= ADD_TRACKS_MAX_ATTEMPTS; attempt += 1) {
+        addTracksAttemptsTotal += 1;
         const addTracksResponse = await fetch(addTracksUrl, {
           method: 'POST',
           headers: {
@@ -1085,6 +1088,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         console.error('[spotify-save] add-tracks failed chunk index:', chunkIndex + 1, 'attempt:', attempt);
 
         if (isTransientChunkError && attempt < ADD_TRACKS_MAX_ATTEMPTS) {
+          addTracksChunksRetried += 1;
           await sleep(retryDelayMs);
           continue;
         }
@@ -1099,6 +1103,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           totalChunks: uriChunks.length,
           failedChunkAttempt: attempt,
           failedChunkStatus: addTracksResponse.status,
+          addTracksAttemptsTotal,
+          addTracksChunksRetried,
         });
         return;
       }
@@ -1112,6 +1118,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           addedBeforeFailure: addedToSpotifyCount,
           failedChunkIndex: chunkIndex + 1,
           totalChunks: uriChunks.length,
+          addTracksAttemptsTotal,
+          addTracksChunksRetried,
         });
         return;
       }
@@ -1140,6 +1148,11 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         recordingSpotifyUrl: reusedRecordingSpotifyUrls,
         isrc: matchedViaIsrc,
         search: searchedSpotifyMatches,
+      },
+      addTracksChunkStats: {
+        totalChunks: uriChunks.length,
+        totalAttempts: addTracksAttemptsTotal,
+        retriedChunks: addTracksChunksRetried,
       },
     });
   } catch (error) {

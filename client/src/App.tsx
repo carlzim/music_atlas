@@ -907,6 +907,11 @@ function PlaylistPage() {
       isrc?: number;
       search?: number;
     };
+    addTracksChunkStats?: {
+      totalChunks?: number;
+      totalAttempts?: number;
+      retriedChunks?: number;
+    };
   } | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1037,12 +1042,19 @@ function PlaylistPage() {
         )
           ? `added ${Math.max(0, Math.floor(data.addedBeforeFailure))} tracks before failing in chunk ${Math.max(1, Math.floor(data.failedChunkIndex))}/${Math.max(1, Math.floor(data.totalChunks))}`
           : '';
+        const chunkRetrySummary = (
+          typeof data?.addTracksAttemptsTotal === 'number'
+          && typeof data?.addTracksChunksRetried === 'number'
+        )
+          ? `chunk attempts ${Math.max(0, Math.floor(data.addTracksAttemptsTotal))}, retries ${Math.max(0, Math.floor(data.addTracksChunksRetried))}`
+          : '';
         const baseError = typeof data?.error === 'string' && data.error.trim().length > 0
           ? data.error.trim()
           : 'Failed to save playlist to Spotify';
         const detailParts = [
           partialSpotifyPlaylistUrl ? 'partial Spotify playlist was created' : '',
           chunkFailureSummary,
+          chunkRetrySummary,
           skipReasonCounts.length > 0 ? `skip reasons: ${skipReasonCounts.join(', ')}` : '',
         ].filter((part) => part.length > 0);
         const detailedError = detailParts.length > 0
@@ -1122,6 +1134,9 @@ function PlaylistPage() {
           : [],
         matchSources: data.matchSources && typeof data.matchSources === 'object'
           ? data.matchSources as { trackSpotifyUrl?: number; recordingSpotifyUrl?: number; isrc?: number; search?: number }
+          : undefined,
+        addTracksChunkStats: data.addTracksChunkStats && typeof data.addTracksChunkStats === 'object'
+          ? data.addTracksChunkStats as { totalChunks?: number; totalAttempts?: number; retriedChunks?: number }
           : undefined,
       });
     } catch (err) {
@@ -1238,6 +1253,13 @@ function PlaylistPage() {
               {' '}ISRC {spotifyMatchDetails.matchSources?.isrc ?? 0},
               {' '}search {spotifyMatchDetails.matchSources?.search ?? 0}
             </p>
+            {spotifyMatchDetails.addTracksChunkStats && (
+              <p>
+                Spotify add-tracks chunks: {spotifyMatchDetails.addTracksChunkStats.totalChunks ?? 0},
+                {' '}attempts: {spotifyMatchDetails.addTracksChunkStats.totalAttempts ?? 0},
+                {' '}retries: {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0}
+              </p>
+            )}
             {spotifyMatchDetails.matchedTracksSample.length > 0 && (
               <details className="verification-details">
                 <summary>Matched tracks sample ({spotifyMatchDetails.matchedTracksSample.length})</summary>

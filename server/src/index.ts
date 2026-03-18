@@ -1072,7 +1072,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     console.log('[spotify-save] add-tracks chunks:', uriChunks.length);
 
     let addedToSpotifyCount = 0;
-    const addTracksMaxAttempts = 3;
+    const addTracksMaxAttempts = getSpotifyAddTracksMaxAttempts();
+    const addTracksBaseRetryDelayMs = getSpotifyAddTracksBaseRetryDelayMs();
+    const addTracksMaxRetryDelayMs = getSpotifyAddTracksMaxRetryDelayMs();
     const addTracksRequestTimeoutMs = getSpotifyAddTracksTimeoutMs();
     let addTracksAttemptsTotal = 0;
     let addTracksChunksRetried = 0;
@@ -1127,7 +1129,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
         const retryDelayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
           ? Math.max(500, Math.floor(retryAfterSeconds * 1000))
-          : Math.min(8000, 400 * Math.pow(2, attempt - 1));
+          : Math.min(addTracksMaxRetryDelayMs, addTracksBaseRetryDelayMs * Math.pow(2, attempt - 1));
 
         console.error('[spotify-save] add-tracks failed status:', chunkFailureStatus);
         console.error('[spotify-save] add-tracks failed body:', addTracksErrorBody);
@@ -1178,6 +1180,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             retriedChunks: addTracksChunksRetried,
             requestTimeoutMs: addTracksRequestTimeoutMs,
             maxAttempts: addTracksMaxAttempts,
+            baseRetryDelayMs: addTracksBaseRetryDelayMs,
+            maxRetryDelayMs: addTracksMaxRetryDelayMs,
           },
         });
         return;
@@ -1217,6 +1221,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             retriedChunks: addTracksChunksRetried,
             requestTimeoutMs: addTracksRequestTimeoutMs,
             maxAttempts: addTracksMaxAttempts,
+            baseRetryDelayMs: addTracksBaseRetryDelayMs,
+            maxRetryDelayMs: addTracksMaxRetryDelayMs,
           },
         });
         return;
@@ -1253,6 +1259,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         retriedChunks: addTracksChunksRetried,
         requestTimeoutMs: addTracksRequestTimeoutMs,
         maxAttempts: addTracksMaxAttempts,
+        baseRetryDelayMs: addTracksBaseRetryDelayMs,
+        maxRetryDelayMs: addTracksMaxRetryDelayMs,
       },
     });
   } catch (error) {

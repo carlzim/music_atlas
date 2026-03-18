@@ -40,6 +40,9 @@ async function sleep(ms: number): Promise<void> {
 
 const DEFAULT_PLAYLIST_TIMEOUT_MS = 45000;
 const DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS = 20000;
+const DEFAULT_SPOTIFY_ADD_TRACKS_MAX_ATTEMPTS = 3;
+const DEFAULT_SPOTIFY_ADD_TRACKS_BASE_RETRY_DELAY_MS = 400;
+const DEFAULT_SPOTIFY_ADD_TRACKS_MAX_RETRY_DELAY_MS = 8000;
 
 function getPlaylistTimeoutMs(): number {
   const parsed = Number(process.env.PLAYLIST_TIMEOUT_MS || DEFAULT_PLAYLIST_TIMEOUT_MS);
@@ -50,6 +53,24 @@ function getPlaylistTimeoutMs(): number {
 function getSpotifyAddTracksTimeoutMs(): number {
   const parsed = Number(process.env.SPOTIFY_ADD_TRACKS_TIMEOUT_MS || DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS);
   if (!Number.isFinite(parsed) || parsed < 5000) return DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS;
+  return Math.floor(parsed);
+}
+
+function getSpotifyAddTracksMaxAttempts(): number {
+  const parsed = Number(process.env.SPOTIFY_ADD_TRACKS_MAX_ATTEMPTS || DEFAULT_SPOTIFY_ADD_TRACKS_MAX_ATTEMPTS);
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_SPOTIFY_ADD_TRACKS_MAX_ATTEMPTS;
+  return Math.max(1, Math.min(5, Math.floor(parsed)));
+}
+
+function getSpotifyAddTracksBaseRetryDelayMs(): number {
+  const parsed = Number(process.env.SPOTIFY_ADD_TRACKS_BASE_RETRY_DELAY_MS || DEFAULT_SPOTIFY_ADD_TRACKS_BASE_RETRY_DELAY_MS);
+  if (!Number.isFinite(parsed) || parsed < 100) return DEFAULT_SPOTIFY_ADD_TRACKS_BASE_RETRY_DELAY_MS;
+  return Math.floor(parsed);
+}
+
+function getSpotifyAddTracksMaxRetryDelayMs(): number {
+  const parsed = Number(process.env.SPOTIFY_ADD_TRACKS_MAX_RETRY_DELAY_MS || DEFAULT_SPOTIFY_ADD_TRACKS_MAX_RETRY_DELAY_MS);
+  if (!Number.isFinite(parsed) || parsed < 500) return DEFAULT_SPOTIFY_ADD_TRACKS_MAX_RETRY_DELAY_MS;
   return Math.floor(parsed);
 }
 
@@ -1051,7 +1072,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     console.log('[spotify-save] add-tracks chunks:', uriChunks.length);
 
     let addedToSpotifyCount = 0;
-    const ADD_TRACKS_MAX_ATTEMPTS = 3;
+    const addTracksMaxAttempts = 3;
     const addTracksRequestTimeoutMs = getSpotifyAddTracksTimeoutMs();
     let addTracksAttemptsTotal = 0;
     let addTracksChunksRetried = 0;
@@ -1061,7 +1082,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       console.log('[spotify-save] add-tracks chunk:', { chunkIndex: chunkIndex + 1, chunkSize: chunk.length });
 
       let chunkAdded = false;
-      for (let attempt = 1; attempt <= ADD_TRACKS_MAX_ATTEMPTS; attempt += 1) {
+      for (let attempt = 1; attempt <= addTracksMaxAttempts; attempt += 1) {
         addTracksAttemptsTotal += 1;
         let addTracksResponse: Response | null = null;
         let addTracksFetchError: string | null = null;
@@ -1115,7 +1136,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         }
         console.error('[spotify-save] add-tracks failed chunk index:', chunkIndex + 1, 'attempt:', attempt);
 
-        if (isTransientChunkError && attempt < ADD_TRACKS_MAX_ATTEMPTS) {
+        if (isTransientChunkError && attempt < addTracksMaxAttempts) {
           addTracksChunksRetried += 1;
           await sleep(retryDelayMs);
           continue;
@@ -1155,6 +1176,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             totalChunks: uriChunks.length,
             totalAttempts: addTracksAttemptsTotal,
             retriedChunks: addTracksChunksRetried,
+            requestTimeoutMs: addTracksRequestTimeoutMs,
+            maxAttempts: addTracksMaxAttempts,
           },
         });
         return;
@@ -1193,6 +1216,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             totalAttempts: addTracksAttemptsTotal,
             retriedChunks: addTracksChunksRetried,
             requestTimeoutMs: addTracksRequestTimeoutMs,
+            maxAttempts: addTracksMaxAttempts,
           },
         });
         return;
@@ -1228,6 +1252,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         totalAttempts: addTracksAttemptsTotal,
         retriedChunks: addTracksChunksRetried,
         requestTimeoutMs: addTracksRequestTimeoutMs,
+        maxAttempts: addTracksMaxAttempts,
       },
     });
   } catch (error) {

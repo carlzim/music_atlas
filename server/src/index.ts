@@ -712,11 +712,19 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     uncertain: 0,
     unknown: 0,
   };
+  let searchScoreCount = 0;
+  let searchScoreTotal = 0;
+  let searchScoreMin: number | null = null;
+  let searchScoreMax: number | null = null;
   const bucketSearchScore = (score: number | null): void => {
     if (typeof score !== 'number' || !Number.isFinite(score)) {
       searchScoreBands.unknown += 1;
       return;
     }
+    searchScoreCount += 1;
+    searchScoreTotal += score;
+    searchScoreMin = searchScoreMin === null ? score : Math.min(searchScoreMin, score);
+    searchScoreMax = searchScoreMax === null ? score : Math.max(searchScoreMax, score);
     if (score >= 6) {
       searchScoreBands.strong += 1;
       return;
@@ -1043,6 +1051,12 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         search: searchedSpotifyMatches,
       },
       searchScoreBands,
+      searchScoreSummary: {
+        scoredCount: searchScoreCount,
+        average: searchScoreCount > 0 ? Number((searchScoreTotal / searchScoreCount).toFixed(2)) : null,
+        min: searchScoreMin,
+        max: searchScoreMax,
+      },
     });
     return;
   }
@@ -1230,6 +1244,12 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             search: searchedSpotifyMatches,
           },
           searchScoreBands,
+          searchScoreSummary: {
+            scoredCount: searchScoreCount,
+            average: searchScoreCount > 0 ? Number((searchScoreTotal / searchScoreCount).toFixed(2)) : null,
+            min: searchScoreMin,
+            max: searchScoreMax,
+          },
           addTracksChunkStats: {
             totalChunks: uriChunks.length,
             totalAttempts: addTracksAttemptsTotal,
@@ -1281,6 +1301,12 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             search: searchedSpotifyMatches,
           },
           searchScoreBands,
+          searchScoreSummary: {
+            scoredCount: searchScoreCount,
+            average: searchScoreCount > 0 ? Number((searchScoreTotal / searchScoreCount).toFixed(2)) : null,
+            min: searchScoreMin,
+            max: searchScoreMax,
+          },
           addTracksChunkStats: {
             totalChunks: uriChunks.length,
             totalAttempts: addTracksAttemptsTotal,
@@ -1327,6 +1353,12 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         search: searchedSpotifyMatches,
       },
       searchScoreBands,
+      searchScoreSummary: {
+        scoredCount: searchScoreCount,
+        average: searchScoreCount > 0 ? Number((searchScoreTotal / searchScoreCount).toFixed(2)) : null,
+        min: searchScoreMin,
+        max: searchScoreMax,
+      },
       addTracksChunkStats: {
         totalChunks: uriChunks.length,
         totalAttempts: addTracksAttemptsTotal,

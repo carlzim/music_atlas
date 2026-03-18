@@ -914,6 +914,12 @@ function PlaylistPage() {
       uncertain?: number;
       unknown?: number;
     };
+    searchScoreSummary?: {
+      scoredCount?: number;
+      average?: number | null;
+      min?: number | null;
+      max?: number | null;
+    };
     addTracksChunkStats?: {
       totalChunks?: number;
       totalAttempts?: number;
@@ -1095,6 +1101,14 @@ function PlaylistPage() {
             weak?: number;
             uncertain?: number;
             unknown?: number;
+          }
+        : undefined,
+      searchScoreSummary: payload.searchScoreSummary && typeof payload.searchScoreSummary === 'object'
+        ? payload.searchScoreSummary as {
+            scoredCount?: number;
+            average?: number | null;
+            min?: number | null;
+            max?: number | null;
           }
         : undefined,
       addTracksChunkStats: payload.addTracksChunkStats && typeof payload.addTracksChunkStats === 'object'
@@ -1408,6 +1422,14 @@ function PlaylistPage() {
                 {' '}weak {spotifyMatchDetails.searchScoreBands.weak ?? 0},
                 {' '}uncertain {spotifyMatchDetails.searchScoreBands.uncertain ?? 0},
                 {' '}unknown {spotifyMatchDetails.searchScoreBands.unknown ?? 0}
+              </p>
+            )}
+            {spotifyMatchDetails.searchScoreSummary && (
+              <p>
+                Search score summary: scored {spotifyMatchDetails.searchScoreSummary.scoredCount ?? 0},
+                {' '}avg {typeof spotifyMatchDetails.searchScoreSummary.average === 'number' ? spotifyMatchDetails.searchScoreSummary.average : 'n/a'},
+                {' '}min {typeof spotifyMatchDetails.searchScoreSummary.min === 'number' ? spotifyMatchDetails.searchScoreSummary.min : 'n/a'},
+                {' '}max {typeof spotifyMatchDetails.searchScoreSummary.max === 'number' ? spotifyMatchDetails.searchScoreSummary.max : 'n/a'}
               </p>
             )}
             {spotifyMatchDetails.addTracksChunkStats && (

@@ -341,6 +341,7 @@ function scoreSpotifyCandidate(
   promptAlbumTokens: Set<string>,
   livePrompt: boolean,
   explicitVenue: string | null,
+  allowsInstrumentalOrKaraoke: boolean,
   targetDurationMs?: number | null
 ): number {
   let score = 0;
@@ -421,6 +422,13 @@ function scoreSpotifyCandidate(
     const archiveStyleRegex = /\bdeluxe\b|\bexpanded\b|\banniversary\b|\bremaster(?:ed)?\b/;
     if (archiveStyleRegex.test(titleAndAlbum)) {
       score -= 1;
+    }
+  }
+
+  if (!allowsInstrumentalOrKaraoke) {
+    const karaokeOrInstrumentalRegex = /\bkaraoke\b|\binstrumental\b|\bacappella\b|\ba cappella\b/;
+    if (karaokeOrInstrumentalRegex.test(titleAndAlbum)) {
+      score -= 2;
     }
   }
 
@@ -667,13 +675,23 @@ function rankSpotifyCandidates(
 ): RankedSpotifyCandidate[] {
   const promptAlbumTokens = getPromptAlbumTokens(promptContext);
   const livePrompt = isLiveOrVenuePrompt(promptContext);
+  const allowsInstrumentalOrKaraoke = /\binstrumental\b|\bkaraoke\b|\ba ?cappella\b|\bbacking track\b/.test(normalizeForMatch(promptContext));
   const allowTitleSuffix = Boolean(explicitVenue);
 
   const ranked: RankedSpotifyCandidate[] = [];
   for (const candidate of candidates) {
     const validation = validateCandidateMatch(artist, song, candidate, allowTitleSuffix);
     if (!validation.ok) continue;
-    const score = scoreSpotifyCandidate(artist, song, candidate, promptAlbumTokens, livePrompt, explicitVenue, targetDurationMs);
+    const score = scoreSpotifyCandidate(
+      artist,
+      song,
+      candidate,
+      promptAlbumTokens,
+      livePrompt,
+      explicitVenue,
+      allowsInstrumentalOrKaraoke,
+      targetDurationMs
+    );
     ranked.push({ ...candidate, score });
   }
 

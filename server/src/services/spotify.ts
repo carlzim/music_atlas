@@ -359,6 +359,9 @@ function scoreSpotifyCandidate(
   const hasPrimaryArtistMatch = Array.from(requestedArtistKeys).some((key) => candidatePrimaryArtistKeys.includes(key));
   if (hasAnyArtistMatch) score += 3;
   if (hasPrimaryArtistMatch) score += 2;
+  if (hasAnyArtistMatch && !hasPrimaryArtistMatch && candidate.artists.length >= 4) {
+    score -= 1;
+  }
   if (candidateTitle === requestedTitle) {
     score += 3;
   } else if (candidateTitle === cleanedRequestedTitle) {

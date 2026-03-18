@@ -2147,10 +2147,12 @@ function applyGeneralArtistDiversity(tracks: Track[]): Track[] {
   const chosen: Track[] = [];
   const chosenKeys = new Set<string>();
   const artistCounts = new Map<string, number>();
+  const albumCounts = new Map<string, number>();
 
   const getTrackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
+  const getAlbumKey = (track: Track): string => normalize(track.album_image_url || '');
 
-  const addWithArtistCap = (artistCap: number): void => {
+  const addWithCaps = (artistCap: number, albumCap: number): void => {
     for (const track of tracks) {
       if (chosen.length >= desiredCount) break;
 
@@ -2163,15 +2165,24 @@ function applyGeneralArtistDiversity(tracks: Track[]): Track[] {
       const artistCount = artistCounts.get(artistKey) || 0;
       if (artistCount >= artistCap) continue;
 
+      const albumKey = getAlbumKey(track);
+      if (albumKey) {
+        const albumCount = albumCounts.get(albumKey) || 0;
+        if (albumCount >= albumCap) continue;
+      }
+
       chosen.push(track);
       chosenKeys.add(trackKey);
       artistCounts.set(artistKey, artistCount + 1);
+      if (albumKey) {
+        albumCounts.set(albumKey, (albumCounts.get(albumKey) || 0) + 1);
+      }
     }
   };
 
-  addWithArtistCap(1);
-  if (chosen.length < desiredCount) addWithArtistCap(2);
-  if (chosen.length < desiredCount) addWithArtistCap(3);
+  addWithCaps(1, 1);
+  if (chosen.length < desiredCount) addWithCaps(2, 2);
+  if (chosen.length < desiredCount) addWithCaps(3, 3);
 
   return chosen.length > 0 ? chosen : tracks;
 }

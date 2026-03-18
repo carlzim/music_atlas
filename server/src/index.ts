@@ -906,6 +906,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       let selectedArtistMatchMode: 'exact' | 'prefix' | 'alias' | 'other' | null = null;
       const displayArtist = typeof track.artist_display === 'string' ? track.artist_display.trim() : '';
       const canTryDisplayArtistFallback = displayArtist.length > 0 && displayArtist !== track.artist;
+      let displayFallbackTried = false;
 
       for (const candidate of candidates) {
         const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
@@ -960,6 +961,44 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         }
       }
 
+      if ((!selectedUrl || !selectedUri) && canTryDisplayArtistFallback) {
+        displayFallbackTried = true;
+        artistNormalizationStats.displayArtistFallbackAttempts += 1;
+        const displayCandidates = await searchTrackCandidates(displayArtist, track.song, playlist.prompt, 6, recordingDurationMs);
+        let displayCandidateCollisionCount = 0;
+        for (const candidate of displayCandidates) {
+          const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
+            ? candidate.spotify_uri.trim()
+            : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
+          if (!candidateUri) continue;
+          const candidateUrl = candidate.spotify_url || spotifyUriToUrl(candidateUri);
+          if (!candidateUrl) continue;
+          if (usedUris.has(candidateUri)) {
+            displayCandidateCollisionCount += 1;
+            continue;
+          }
+          selectedUrl = candidateUrl;
+          selectedUri = candidateUri;
+          selectedDurationMs = typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms)
+            ? candidate.duration_ms
+            : null;
+          selectedScore = typeof candidate.score === 'number' && Number.isFinite(candidate.score)
+            ? candidate.score
+            : null;
+          selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
+            ? candidate.artist_match_mode
+            : null;
+          artistNormalizationStats.displayArtistFallbackMatches += 1;
+          break;
+        }
+
+        if (!selectedUrl && displayCandidates.length > 0 && displayCandidateCollisionCount >= displayCandidates.length) {
+          skipReason = 'fallback_display_uri_collision';
+        } else if (!selectedUrl && (skipReason === 'search_no_candidates' || skipReason === 'fallback_no_match')) {
+          skipReason = 'fallback_display_no_match';
+        }
+      }
+
       if (!selectedUrl) {
         if (candidates.length === 0) {
           skipReason = 'search_no_candidates';
@@ -995,7 +1034,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         }
       }
 
-      if ((!selectedUrl || !selectedUri) && canTryDisplayArtistFallback) {
+      if ((!selectedUrl || !selectedUri) && canTryDisplayArtistFallback && !displayFallbackTried) {
         artistNormalizationStats.displayArtistFallbackAttempts += 1;
         const spotifyInfo = await searchTrackWithDiagnostics(displayArtist, track.song, playlist.prompt, recordingDurationMs);
         if (spotifyInfo.spotify_url || spotifyInfo.spotify_uri) {

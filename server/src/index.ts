@@ -693,7 +693,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   const uris: string[] = [];
   const usedUris = new Set<string>();
   const playlistTrackSpotifyUpdates: Array<{ artist: string; song: string; spotifyUrl?: string; spotifyUri?: string }> = [];
-  const matchedTracks: Array<{ artist: string; song: string; source: 'track_link' | 'recording_cache' | 'isrc' | 'search'; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'other' }> = [];
+  const matchedTracks: Array<{ artist: string; song: string; source: 'track_link' | 'recording_cache' | 'isrc' | 'search'; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other' }> = [];
   const metadataLookupCache = new Map<string, { isrc: string | null; durationMs: number | null }>();
   const isrcCandidateCache = new Map<string, Array<{ spotify_url: string | null; spotify_uri?: string | null; duration_ms?: number | null }>>();
   let matchedTrackCount = 0;
@@ -717,6 +717,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     tracksWithArtistDisplay: trackQueries.filter((track) => typeof track.artist_display === 'string' && track.artist_display.trim().length > 0).length,
     searchExactArtistMatches: 0,
     searchPrefixArtistMatches: 0,
+    searchAliasArtistMatches: 0,
     searchOtherArtistMatches: 0,
   };
   let searchScoreCount = 0;
@@ -900,7 +901,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       let selectedUri: string | null = null;
       let selectedDurationMs: number | null = null;
       let selectedScore: number | null = null;
-      let selectedArtistMatchMode: 'exact' | 'prefix' | 'other' | null = null;
+      let selectedArtistMatchMode: 'exact' | 'prefix' | 'alias' | 'other' | null = null;
 
       for (const candidate of candidates) {
         const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
@@ -921,7 +922,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         selectedScore = typeof candidate.score === 'number' && Number.isFinite(candidate.score)
           ? candidate.score
           : null;
-        selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'other'
+        selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
           ? candidate.artist_match_mode
           : null;
         break;
@@ -948,7 +949,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           selectedScore = typeof candidate.score === 'number' && Number.isFinite(candidate.score)
             ? candidate.score
             : null;
-          selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'other'
+          selectedArtistMatchMode = candidate.artist_match_mode === 'exact' || candidate.artist_match_mode === 'prefix' || candidate.artist_match_mode === 'alias' || candidate.artist_match_mode === 'other'
             ? candidate.artist_match_mode
             : null;
           break;
@@ -979,7 +980,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             selectedScore = typeof spotifyInfo.score === 'number' && Number.isFinite(spotifyInfo.score)
               ? spotifyInfo.score
               : null;
-            selectedArtistMatchMode = spotifyInfo.artist_match_mode === 'exact' || spotifyInfo.artist_match_mode === 'prefix' || spotifyInfo.artist_match_mode === 'other'
+            selectedArtistMatchMode = spotifyInfo.artist_match_mode === 'exact' || spotifyInfo.artist_match_mode === 'prefix' || spotifyInfo.artist_match_mode === 'alias' || spotifyInfo.artist_match_mode === 'other'
               ? spotifyInfo.artist_match_mode
               : null;
           } else if (fallbackUri && usedUris.has(fallbackUri)) {
@@ -999,6 +1000,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           artistNormalizationStats.searchExactArtistMatches += 1;
         } else if (selectedArtistMatchMode === 'prefix') {
           artistNormalizationStats.searchPrefixArtistMatches += 1;
+        } else if (selectedArtistMatchMode === 'alias') {
+          artistNormalizationStats.searchAliasArtistMatches += 1;
         } else if (selectedArtistMatchMode === 'other') {
           artistNormalizationStats.searchOtherArtistMatches += 1;
         }

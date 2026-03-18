@@ -11,14 +11,14 @@ export interface SpotifyTrackInfo {
 export interface SpotifyTrackCandidateInfo extends SpotifyTrackInfo {
   spotify_uri?: string | null;
   score?: number | null;
-  artist_match_mode?: 'exact' | 'prefix' | 'other';
+  artist_match_mode?: 'exact' | 'prefix' | 'alias' | 'other';
 }
 
 export interface SpotifyTrackDebugInfo extends SpotifyTrackInfo {
   score: number | null;
   matchedTitle: string | null;
   matchedAlbumTitle: string | null;
-  artist_match_mode?: 'exact' | 'prefix' | 'other';
+  artist_match_mode?: 'exact' | 'prefix' | 'alias' | 'other';
 }
 
 interface SpotifyCandidate {
@@ -41,7 +41,7 @@ interface SpotifySearchResult {
 
 interface RankedSpotifyCandidate extends SpotifyCandidate {
   score: number;
-  artist_match_mode: 'exact' | 'prefix' | 'other';
+  artist_match_mode: 'exact' | 'prefix' | 'alias' | 'other';
 }
 
 interface ArtistSearchCacheEntry {
@@ -64,6 +64,10 @@ let loggedSpotifyFinalQuery = false;
 
 const GLOBAL_RATE_LIMIT_FALLBACK_MS = 30 * 1000;
 const GLOBAL_RATE_LIMIT_MAX_MS = 60 * 1000;
+const PRIMARY_ARTIST_ALIAS_OVERRIDES: Record<string, string[]> = {
+  'lill': ['Lill Lindfors'],
+  'pugh': ['Pugh Rogefeldt'],
+};
 
 async function getAccessToken(): Promise<string | null> {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
@@ -255,15 +259,30 @@ function splitSpotifyArtistContributors(value: string): { primaryArtist: string;
   };
 }
 
-function getRequestedArtistKeys(artist: string): { primaryArtist: string; keys: Set<string> } {
+function getPrimaryArtistAliasNames(primaryArtist: string): string[] {
+  const normalizedPrimary = normalizeForMatch(primaryArtist);
+  if (!normalizedPrimary) return [];
+  const aliases = PRIMARY_ARTIST_ALIAS_OVERRIDES[normalizedPrimary] || [];
+  if (aliases.length === 0) return [];
+  const tokenCount = normalizedPrimary.split(/\s+/g).filter(Boolean).length;
+  if (tokenCount > 2) return [];
+  return aliases.slice(0, 4);
+}
+
+function getRequestedArtistKeys(artist: string): { primaryArtist: string; keys: Set<string>; aliasKeys: Set<string> } {
   const parsed = splitSpotifyArtistContributors(artist);
   const primaryArtist = parsed.primaryArtist || artist;
   const keys = new Set<string>();
+  const aliasKeys = new Set<string>();
 
   for (const key of getArtistMatchKeys(primaryArtist)) keys.add(key);
   for (const key of getArtistMatchKeys(artist)) keys.add(key);
 
-  return { primaryArtist, keys };
+  for (const aliasName of getPrimaryArtistAliasNames(primaryArtist)) {
+    for (const key of getArtistMatchKeys(aliasName)) aliasKeys.add(key);
+  }
+
+  return { primaryArtist, keys, aliasKeys };
 }
 
 function toArtistWordTokens(value: string): string[] {
@@ -304,8 +323,10 @@ function validateCandidateMatch(
 ): { ok: boolean; reason?: string } {
   const requested = getRequestedArtistKeys(artist);
   const requestedArtistKeys = requested.keys;
+  const requestedAliasKeys = requested.aliasKeys;
   const candidateArtistKeys = candidate.artists.flatMap((candidateArtist) => Array.from(getArtistMatchKeys(candidateArtist)));
   const artistOk = Array.from(requestedArtistKeys).some((key) => candidateArtistKeys.includes(key))
+    || Array.from(requestedAliasKeys).some((key) => candidateArtistKeys.includes(key))
     || hasLoosePrimaryArtistPrefixMatch(requested.primaryArtist, candidate);
   if (!artistOk) {
     return { ok: false, reason: 'artist mismatch' };
@@ -425,6 +446,7 @@ function scoreSpotifyCandidate(
   let score = 0;
   const requested = getRequestedArtistKeys(artist);
   const requestedArtistKeys = requested.keys;
+  const requestedAliasKeys = requested.aliasKeys;
   const requestedPrimaryArtistKeys = getArtistMatchKeys(requested.primaryArtist);
   const requestedTitle = normalizeTitleKey(song);
   const cleanedRequestedTitle = normalizeTitleKey(cleanSongTitle(song));
@@ -438,9 +460,11 @@ function scoreSpotifyCandidate(
   const titleAndAlbum = `${candidateTitle} ${albumTitle}`;
 
   const hasAnyArtistMatch = Array.from(requestedArtistKeys).some((key) => candidateArtists.includes(key));
+  const hasAliasArtistMatch = Array.from(requestedAliasKeys).some((key) => candidateArtists.includes(key));
   const hasPrimaryArtistMatch = Array.from(requestedPrimaryArtistKeys).some((key) => candidatePrimaryArtistKeys.includes(key));
   const hasLoosePrimaryPrefixMatch = hasLoosePrimaryArtistPrefixMatch(requested.primaryArtist, candidate);
   if (hasAnyArtistMatch) score += 3;
+  if (!hasAnyArtistMatch && hasAliasArtistMatch) score += 2;
   if (hasPrimaryArtistMatch) score += 2;
   if (!hasPrimaryArtistMatch && hasLoosePrimaryPrefixMatch) score += 1;
   if (hasAnyArtistMatch && !hasPrimaryArtistMatch && candidate.artists.length >= 4) {
@@ -701,6 +725,9 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
     const safeArtist = sanitizeQueryValue(requested.primaryArtist || artist);
     const safeOriginalArtist = sanitizeQueryValue(artist);
     const hasDistinctOriginalArtist = safeOriginalArtist.length > 0 && safeOriginalArtist !== safeArtist;
+    const aliasArtists = getPrimaryArtistAliasNames(requested.primaryArtist)
+      .map((name) => sanitizeQueryValue(name))
+      .filter((name) => name.length > 0 && name !== safeArtist && name !== safeOriginalArtist);
     const safeVenue = explicitVenue ? sanitizeQueryValue(explicitVenue) : '';
     const structuredQuery = safeVenue
       ? `track:"${safeSong}" artist:"${safeArtist}" ${safeVenue}`
@@ -750,6 +777,17 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
         result = await searchSpotify(`artist:"${safeOriginalArtist}"`, token, 10);
         if (result.candidates.length === 0 && !result.rateLimitedAbort) {
           result = await searchSpotify(safeOriginalArtist, token, 10);
+        }
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && aliasArtists.length > 0) {
+        for (const aliasArtist of aliasArtists) {
+          const aliasStructuredQuery = `track:"${safeSong}" artist:"${aliasArtist}"`;
+          const aliasFallbackQuery = `${safeSong} ${aliasArtist}`.trim();
+          result = await searchSpotify(aliasStructuredQuery, token, 10);
+          if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+            result = await searchSpotify(aliasFallbackQuery, token, 10);
+          }
+          if (result.candidates.length > 0 || result.rateLimitedAbort) break;
         }
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
@@ -817,6 +855,7 @@ function rankSpotifyCandidates(
   const allowTitleSuffix = Boolean(explicitVenue);
   const requested = getRequestedArtistKeys(artist);
   const requestedPrimaryArtistKeys = getArtistMatchKeys(requested.primaryArtist);
+  const requestedAliasKeys = requested.aliasKeys;
 
   const ranked: RankedSpotifyCandidate[] = [];
   for (const candidate of candidates) {
@@ -825,11 +864,15 @@ function rankSpotifyCandidates(
     const candidatePrimaryArtistKeys = candidate.artists.length > 0
       ? Array.from(getArtistMatchKeys(candidate.artists[0]))
       : [];
+    const candidateArtistKeys = candidate.artists.flatMap((candidateArtist) => Array.from(getArtistMatchKeys(candidateArtist)));
     const hasPrimaryArtistMatch = Array.from(requestedPrimaryArtistKeys).some((key) => candidatePrimaryArtistKeys.includes(key));
     const hasLoosePrimaryPrefixMatch = !hasPrimaryArtistMatch && hasLoosePrimaryArtistPrefixMatch(requested.primaryArtist, candidate);
-    const artistMatchMode: 'exact' | 'prefix' | 'other' = hasPrimaryArtistMatch
+    const hasAliasArtistMatch = !hasPrimaryArtistMatch
+      && !hasLoosePrimaryPrefixMatch
+      && Array.from(requestedAliasKeys).some((key) => candidateArtistKeys.includes(key));
+    const artistMatchMode: 'exact' | 'prefix' | 'alias' | 'other' = hasPrimaryArtistMatch
       ? 'exact'
-      : (hasLoosePrimaryPrefixMatch ? 'prefix' : 'other');
+      : (hasLoosePrimaryPrefixMatch ? 'prefix' : (hasAliasArtistMatch ? 'alias' : 'other'));
     const score = scoreSpotifyCandidate(
       artist,
       song,
@@ -905,6 +948,9 @@ export async function searchTrackCandidates(
     const safeArtist = sanitizeQueryValue(requested.primaryArtist || artist);
     const safeOriginalArtist = sanitizeQueryValue(artist);
     const hasDistinctOriginalArtist = safeOriginalArtist.length > 0 && safeOriginalArtist !== safeArtist;
+    const aliasArtists = getPrimaryArtistAliasNames(requested.primaryArtist)
+      .map((name) => sanitizeQueryValue(name))
+      .filter((name) => name.length > 0 && name !== safeArtist && name !== safeOriginalArtist);
     const safeVenue = explicitVenue ? sanitizeQueryValue(explicitVenue) : '';
     const structuredQuery = safeVenue
       ? `track:"${safeSong}" artist:"${safeArtist}" ${safeVenue}`
@@ -948,6 +994,17 @@ export async function searchTrackCandidates(
         result = await searchSpotify(`artist:"${safeOriginalArtist}"`, token, spotifyFetchLimit);
         if (result.candidates.length === 0 && !result.rateLimitedAbort) {
           result = await searchSpotify(safeOriginalArtist, token, spotifyFetchLimit);
+        }
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort && aliasArtists.length > 0) {
+        for (const aliasArtist of aliasArtists) {
+          const aliasStructuredQuery = `track:"${safeSong}" artist:"${aliasArtist}"`;
+          const aliasFallbackQuery = `${safeSong} ${aliasArtist}`.trim();
+          result = await searchSpotify(aliasStructuredQuery, token, spotifyFetchLimit);
+          if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+            result = await searchSpotify(aliasFallbackQuery, token, spotifyFetchLimit);
+          }
+          if (result.candidates.length > 0 || result.rateLimitedAbort) break;
         }
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {

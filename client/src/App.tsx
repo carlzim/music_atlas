@@ -898,7 +898,7 @@ function PlaylistPage() {
     duplicateUriMatches: number;
     uncertainMatches: number;
     uncertainTracks: Array<{ artist: string; song: string; score: number }>;
-    matchedTracksSample: Array<{ artist: string; song: string; source: string; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'other' }>;
+    matchedTracksSample: Array<{ artist: string; song: string; source: string; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other' }>;
     skipReasonCounts: Record<string, number>;
     skippedTracks: Array<{ artist: string; song: string; reason?: string }>;
     matchSources?: {
@@ -912,6 +912,7 @@ function PlaylistPage() {
       tracksWithArtistDisplay?: number;
       searchExactArtistMatches?: number;
       searchPrefixArtistMatches?: number;
+      searchAliasArtistMatches?: number;
       searchOtherArtistMatches?: number;
     };
     searchScoreBands?: {
@@ -1060,7 +1061,7 @@ function PlaylistPage() {
         : [],
       matchedTracksSample: Array.isArray(payload.matchedTracksSample)
         ? payload.matchedTracksSample
-            .filter((item: unknown): item is { artist: string; song: string; source: string; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'other' } => {
+            .filter((item: unknown): item is { artist: string; song: string; source: string; score?: number | null; artistMatchMode?: 'exact' | 'prefix' | 'alias' | 'other' } => {
               return Boolean(
                 item
                   && typeof item === 'object'
@@ -1073,8 +1074,9 @@ function PlaylistPage() {
               ...item,
               artistMatchMode: (item as { artistMatchMode?: unknown }).artistMatchMode === 'exact'
                 || (item as { artistMatchMode?: unknown }).artistMatchMode === 'prefix'
+                || (item as { artistMatchMode?: unknown }).artistMatchMode === 'alias'
                 || (item as { artistMatchMode?: unknown }).artistMatchMode === 'other'
-                ? (item as { artistMatchMode: 'exact' | 'prefix' | 'other' }).artistMatchMode
+                ? (item as { artistMatchMode: 'exact' | 'prefix' | 'alias' | 'other' }).artistMatchMode
                 : undefined,
             }))
             .slice(0, 20)
@@ -1115,6 +1117,7 @@ function PlaylistPage() {
             tracksWithArtistDisplay?: number;
             searchExactArtistMatches?: number;
             searchPrefixArtistMatches?: number;
+            searchAliasArtistMatches?: number;
             searchOtherArtistMatches?: number;
           }
         : undefined,
@@ -1445,6 +1448,7 @@ function PlaylistPage() {
                 {' '}display aliases {spotifyMatchDetails.artistNormalizationStats.tracksWithArtistDisplay ?? 0},
                 {' '}search exact {spotifyMatchDetails.artistNormalizationStats.searchExactArtistMatches ?? 0},
                 {' '}search prefix {spotifyMatchDetails.artistNormalizationStats.searchPrefixArtistMatches ?? 0},
+                {' '}search alias {spotifyMatchDetails.artistNormalizationStats.searchAliasArtistMatches ?? 0},
                 {' '}search other {spotifyMatchDetails.artistNormalizationStats.searchOtherArtistMatches ?? 0}
               </p>
             )}

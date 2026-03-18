@@ -319,6 +319,12 @@ function spotifyUrlToUri(url: string): string | null {
   return `spotify:track:${match[1]}`;
 }
 
+function spotifyUriToUrl(uri: string): string | null {
+  const match = String(uri || '').trim().match(/^spotify:track:([A-Za-z0-9]+)$/);
+  if (!match) return null;
+  return `https://open.spotify.com/track/${match[1]}`;
+}
+
 function getSpotifyConfig(): { clientId: string; clientSecret: string; redirectUri: string; frontendUrl: string } | null {
   const clientId = process.env.SPOTIFY_CLIENT_ID;
   const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
@@ -715,9 +721,15 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         const spotifyIsrcCandidates = await searchTrackCandidatesByIsrc(recordingIsrc, 6, recordingDurationMs);
         let isrcCollisionCount = 0;
         for (const candidate of spotifyIsrcCandidates) {
-          if (!candidate.spotify_url) continue;
-          const uri = spotifyUrlToUri(candidate.spotify_url);
-          if (!uri) continue;
+          const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
+            ? candidate.spotify_uri.trim()
+            : (typeof candidate.spotify_url === 'string' ? spotifyUrlToUri(candidate.spotify_url) : null);
+          if (!candidateUri) continue;
+          const candidateUrl = typeof candidate.spotify_url === 'string' && candidate.spotify_url.trim().length > 0
+            ? candidate.spotify_url
+            : spotifyUriToUrl(candidateUri);
+          if (!candidateUrl) continue;
+          const uri = candidateUri;
           if (usedUris.has(uri)) {
             isrcCollisionCount += 1;
             continue;
@@ -725,8 +737,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           uris.push(uri);
           usedUris.add(uri);
           matchedViaIsrc += 1;
-          setRecordingSpotifyUrl(track.artist, track.song, candidate.spotify_url);
-          playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: candidate.spotify_url });
+          setRecordingSpotifyUrl(track.artist, track.song, candidateUrl);
+          playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: candidateUrl });
           if (typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms) && candidate.duration_ms > 0) {
             setRecordingDurationMs(track.artist, track.song, candidate.duration_ms);
           }
@@ -744,14 +756,17 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         if (matchedCurrentTrack) continue;
 
         const spotifyByIsrc = await searchTrackByIsrc(recordingIsrc, recordingDurationMs);
-        if (spotifyByIsrc.spotify_url) {
-          const uri = spotifyUrlToUri(spotifyByIsrc.spotify_url);
-          if (uri && !usedUris.has(uri)) {
+        if (spotifyByIsrc.spotify_url || spotifyByIsrc.spotify_uri) {
+          const uri = typeof spotifyByIsrc.spotify_uri === 'string' && spotifyByIsrc.spotify_uri.trim().length > 0
+            ? spotifyByIsrc.spotify_uri.trim()
+            : (spotifyByIsrc.spotify_url ? spotifyUrlToUri(spotifyByIsrc.spotify_url) : null);
+          const spotifyUrl = spotifyByIsrc.spotify_url || (uri ? spotifyUriToUrl(uri) : null);
+          if (uri && spotifyUrl && !usedUris.has(uri)) {
             uris.push(uri);
             usedUris.add(uri);
             matchedViaIsrc += 1;
-            setRecordingSpotifyUrl(track.artist, track.song, spotifyByIsrc.spotify_url);
-            playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: spotifyByIsrc.spotify_url });
+            setRecordingSpotifyUrl(track.artist, track.song, spotifyUrl);
+            playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl });
             if (typeof spotifyByIsrc.duration_ms === 'number' && Number.isFinite(spotifyByIsrc.duration_ms) && spotifyByIsrc.duration_ms > 0) {
               setRecordingDurationMs(track.artist, track.song, spotifyByIsrc.duration_ms);
             }
@@ -778,10 +793,12 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       let selectedScore: number | null = null;
 
       for (const candidate of candidates) {
-        const candidateUrl = candidate.spotify_url;
-        if (!candidateUrl) continue;
-        const candidateUri = spotifyUrlToUri(candidateUrl);
+        const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
+          ? candidate.spotify_uri.trim()
+          : (candidate.spotify_url ? spotifyUrlToUri(candidate.spotify_url) : null);
         if (!candidateUri) continue;
+        const candidateUrl = candidate.spotify_url || spotifyUriToUrl(candidateUri);
+        if (!candidateUrl) continue;
         if (usedUris.has(candidateUri)) {
           candidateUriCollisionCount += 1;
           continue;
@@ -807,10 +824,13 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
       if (!selectedUrl || !selectedUri) {
         const spotifyInfo = await searchTrackWithDiagnostics(track.artist, track.song, playlist.prompt, recordingDurationMs);
-        if (spotifyInfo.spotify_url) {
-          const fallbackUri = spotifyUrlToUri(spotifyInfo.spotify_url);
-          if (fallbackUri && !usedUris.has(fallbackUri)) {
-            selectedUrl = spotifyInfo.spotify_url;
+        if (spotifyInfo.spotify_url || spotifyInfo.spotify_uri) {
+          const fallbackUri = typeof spotifyInfo.spotify_uri === 'string' && spotifyInfo.spotify_uri.trim().length > 0
+            ? spotifyInfo.spotify_uri.trim()
+            : (spotifyInfo.spotify_url ? spotifyUrlToUri(spotifyInfo.spotify_url) : null);
+          const fallbackUrl = spotifyInfo.spotify_url || (fallbackUri ? spotifyUriToUrl(fallbackUri) : null);
+          if (fallbackUri && fallbackUrl && !usedUris.has(fallbackUri)) {
+            selectedUrl = fallbackUrl;
             selectedUri = fallbackUri;
             selectedDurationMs = typeof spotifyInfo.duration_ms === 'number' && Number.isFinite(spotifyInfo.duration_ms)
               ? spotifyInfo.duration_ms

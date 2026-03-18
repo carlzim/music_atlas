@@ -1055,36 +1055,48 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       let chunkAdded = false;
       for (let attempt = 1; attempt <= ADD_TRACKS_MAX_ATTEMPTS; attempt += 1) {
         addTracksAttemptsTotal += 1;
-        const addTracksResponse = await fetch(addTracksUrl, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(addTracksBody),
-        });
+        let addTracksResponse: Response | null = null;
+        let addTracksFetchError: string | null = null;
+        try {
+          addTracksResponse = await fetch(addTracksUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(addTracksBody),
+          });
+        } catch (error) {
+          addTracksFetchError = error instanceof Error ? error.message : String(error);
+        }
 
-        if (addTracksResponse.ok) {
+        if (addTracksResponse?.ok) {
           chunkAdded = true;
           break;
         }
 
         let addTracksErrorBody: unknown = null;
-        try {
-          addTracksErrorBody = await addTracksResponse.json();
-        } catch {
-          addTracksErrorBody = null;
+        if (addTracksResponse) {
+          try {
+            addTracksErrorBody = await addTracksResponse.json();
+          } catch {
+            addTracksErrorBody = null;
+          }
         }
 
-        const isTransientChunkError = addTracksResponse.status === 429 || addTracksResponse.status >= 500;
-        const retryAfterHeader = addTracksResponse.headers.get('Retry-After');
+        const chunkFailureStatus = addTracksResponse ? addTracksResponse.status : 'fetch_error';
+        const isTransientChunkError = !addTracksResponse || addTracksResponse.status === 429 || addTracksResponse.status >= 500;
+        const retryAfterHeader = addTracksResponse?.headers.get('Retry-After') || null;
         const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
         const retryDelayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
           ? Math.max(500, Math.floor(retryAfterSeconds * 1000))
           : Math.min(8000, 400 * Math.pow(2, attempt - 1));
 
-        console.error('[spotify-save] add-tracks failed status:', addTracksResponse.status);
+        console.error('[spotify-save] add-tracks failed status:', chunkFailureStatus);
         console.error('[spotify-save] add-tracks failed body:', addTracksErrorBody);
+        if (addTracksFetchError) {
+          console.error('[spotify-save] add-tracks fetch error:', addTracksFetchError);
+        }
         console.error('[spotify-save] add-tracks failed chunk index:', chunkIndex + 1, 'attempt:', attempt);
 
         if (isTransientChunkError && attempt < ADD_TRACKS_MAX_ATTEMPTS) {
@@ -1102,7 +1114,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           failedChunkIndex: chunkIndex + 1,
           totalChunks: uriChunks.length,
           failedChunkAttempt: attempt,
-          failedChunkStatus: addTracksResponse.status,
+          failedChunkStatus: chunkFailureStatus,
+          failedChunkError: addTracksFetchError,
           addTracksAttemptsTotal,
           addTracksChunksRetried,
           addedTracks,

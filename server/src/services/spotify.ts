@@ -44,6 +44,17 @@ interface RankedSpotifyCandidate extends SpotifyCandidate {
   artist_match_mode: 'exact' | 'prefix' | 'alias' | 'other';
 }
 
+function getArtistMatchModeRank(mode: RankedSpotifyCandidate['artist_match_mode']): number {
+  switch (mode) {
+    case 'exact': return 4;
+    case 'prefix': return 3;
+    case 'alias': return 2;
+    case 'other':
+    default:
+      return 1;
+  }
+}
+
 interface ArtistSearchCacheEntry {
   candidates: SpotifyCandidate[];
   rateLimitedAbort: boolean;
@@ -920,6 +931,8 @@ function rankSpotifyCandidates(
 
   ranked.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    const artistModeRankDiff = getArtistMatchModeRank(b.artist_match_mode) - getArtistMatchModeRank(a.artist_match_mode);
+    if (artistModeRankDiff !== 0) return artistModeRankDiff;
     const aVariant = isLikelyVariantCandidate(a);
     const bVariant = isLikelyVariantCandidate(b);
     if (aVariant !== bVariant) {

@@ -897,6 +897,7 @@ function PlaylistPage() {
     skippedTracksTotal: number;
     duplicateUriMatches: number;
     uncertainMatches: number;
+    uncertainTracks: Array<{ artist: string; song: string; score: number }>;
     skipReasonCounts: Record<string, number>;
     skippedTracks: Array<{ artist: string; song: string; reason?: string }>;
     matchSources?: {
@@ -1047,6 +1048,19 @@ function PlaylistPage() {
           : (typeof data.skipped === 'number' ? Math.max(0, Math.floor(data.skipped)) : 0),
         duplicateUriMatches: typeof data.duplicateUriMatches === 'number' ? data.duplicateUriMatches : 0,
         uncertainMatches: typeof data.uncertainMatches === 'number' ? data.uncertainMatches : 0,
+        uncertainTracks: Array.isArray(data.uncertainTracks)
+          ? data.uncertainTracks
+              .filter((item: unknown): item is { artist: string; song: string; score: number } => {
+                return Boolean(
+                  item
+                    && typeof item === 'object'
+                    && typeof (item as { artist?: unknown }).artist === 'string'
+                    && typeof (item as { song?: unknown }).song === 'string'
+                    && typeof (item as { score?: unknown }).score === 'number'
+                );
+              })
+              .slice(0, 20)
+          : [],
         skipReasonCounts: data.skipReasonCounts && typeof data.skipReasonCounts === 'object'
           ? Object.entries(data.skipReasonCounts as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, value]) => {
               if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
@@ -1196,7 +1210,21 @@ function PlaylistPage() {
               <p>{spotifyMatchDetails.duplicateUriMatches} matched tracks shared duplicate Spotify versions and were collapsed in Spotify export.</p>
             )}
             {spotifyMatchDetails.uncertainMatches > 0 && (
-              <p>{spotifyMatchDetails.uncertainMatches} matches had low confidence (score &lt;= 0). Review skipped list and rerun if needed.</p>
+              <>
+                <p>{spotifyMatchDetails.uncertainMatches} matches had low confidence (score &lt;= 0). Review uncertain/skip lists and rerun if needed.</p>
+                {spotifyMatchDetails.uncertainTracks.length > 0 && (
+                  <details className="verification-details">
+                    <summary>Low-confidence tracks sample ({spotifyMatchDetails.uncertainTracks.length})</summary>
+                    <ul className="playlist-list">
+                      {spotifyMatchDetails.uncertainTracks.map((track, idx) => (
+                        <li key={`${track.artist}-${track.song}-uncertain-${idx}`} className="playlist-item">
+                          {track.song} - {track.artist} (score {track.score})
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
             )}
             {Object.keys(spotifyMatchDetails.skipReasonCounts).length > 0 && (
               <p>

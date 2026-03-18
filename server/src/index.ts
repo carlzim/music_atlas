@@ -663,6 +663,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   let discoveredIsrcCount = 0;
   let searchedSpotifyMatches = 0;
   let uncertainSearchMatches = 0;
+  const uncertainTracks: Array<{ artist: string; song: string; score: number }> = [];
   for (const track of trackQueries) {
     let matchedCurrentTrack = false;
     let skipReason = 'no_match_found';
@@ -900,6 +901,11 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         searchedSpotifyMatches += 1;
         if (typeof selectedScore === 'number' && selectedScore <= 0) {
           uncertainSearchMatches += 1;
+          uncertainTracks.push({
+            artist: track.artist,
+            song: track.song,
+            score: selectedScore,
+          });
         }
         setRecordingSpotifyUrl(track.artist, track.song, selectedUrl);
         setRecordingSpotifyUri(track.artist, track.song, selectedUri);
@@ -954,6 +960,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       skipped,
       skippedTracksTotal: skippedTracks.length,
       uncertainMatches: uncertainSearchMatches,
+      uncertainTracks: uncertainTracks.slice(0, 20),
       skipReasonCounts,
       skippedTracks: skippedTracks.slice(0, 20),
       matchSources: {
@@ -1058,6 +1065,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       skipped,
       duplicateUriMatches,
       uncertainMatches: uncertainSearchMatches,
+      uncertainTracks: uncertainTracks.slice(0, 20),
       skippedTracksTotal: skippedTracks.length,
       skipReasonCounts,
       skippedTracks: skippedTracks.slice(0, 20),

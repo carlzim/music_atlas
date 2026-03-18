@@ -112,8 +112,12 @@ function cleanSongTitle(song: string): string {
     .trim();
 }
 
+function stripDiacritics(value: string): string {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
 function normalizeForMatch(value: string): string {
-  return value
+  return stripDiacritics(value)
     .toLowerCase()
     .replace(/\b(feat\.?|ft\.?|featuring)\b.*$/i, '')
     .replace(/\([^)]*\)/g, ' ')
@@ -164,7 +168,7 @@ function validateCandidateMatch(
   const cleanedRequestedTitle = normalizeTitleKey(cleanSongTitle(song));
   const candidateTitle = normalizeTitleKey(candidate.title);
   const normalizeLooseTitleTokens = (value: string): string[] => {
-    return value
+    return stripDiacritics(value)
       .toLowerCase()
       .replace(/[’']/g, '')
       .replace(/[^a-z0-9\s]/g, ' ')

@@ -911,6 +911,7 @@ function PlaylistPage() {
       totalChunks?: number;
       totalAttempts?: number;
       retriedChunks?: number;
+      requestTimeoutMs?: number;
     };
   } | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
@@ -1065,7 +1066,7 @@ function PlaylistPage() {
         ? payload.matchSources as { trackSpotifyUrl?: number; recordingSpotifyUrl?: number; isrc?: number; search?: number }
         : undefined,
       addTracksChunkStats: payload.addTracksChunkStats && typeof payload.addTracksChunkStats === 'object'
-        ? payload.addTracksChunkStats as { totalChunks?: number; totalAttempts?: number; retriedChunks?: number }
+        ? payload.addTracksChunkStats as { totalChunks?: number; totalAttempts?: number; retriedChunks?: number; requestTimeoutMs?: number }
         : undefined,
     };
   };
@@ -1122,6 +1123,9 @@ function PlaylistPage() {
         )
           ? `chunk failure details: status ${String(data.failedChunkStatus ?? 'unknown')}, attempt ${typeof data?.failedChunkAttempt === 'number' ? Math.max(1, Math.floor(data.failedChunkAttempt)) : 'n/a'}`
           : '';
+        const chunkTimeoutSummary = typeof data?.failedChunkTimeoutMs === 'number' && Number.isFinite(data.failedChunkTimeoutMs)
+          ? `chunk timeout ${Math.max(0, Math.floor(data.failedChunkTimeoutMs))}ms`
+          : '';
         const chunkFailureError = typeof data?.failedChunkError === 'string' && data.failedChunkError.trim().length > 0
           ? `chunk error: ${data.failedChunkError.trim()}`
           : '';
@@ -1138,6 +1142,7 @@ function PlaylistPage() {
           partialSpotifyPlaylistUrl ? 'partial Spotify playlist was created' : '',
           chunkFailureSummary,
           chunkFailureDetail,
+          chunkTimeoutSummary,
           chunkFailureError,
           chunkRetrySummary,
           skipReasonCounts.length > 0 ? `skip reasons: ${skipReasonCounts.join(', ')}` : '',
@@ -1277,7 +1282,8 @@ function PlaylistPage() {
               <p>
                 Spotify add-tracks chunks: {spotifyMatchDetails.addTracksChunkStats.totalChunks ?? 0},
                 {' '}attempts: {spotifyMatchDetails.addTracksChunkStats.totalAttempts ?? 0},
-                {' '}retries: {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0}
+                {' '}retries: {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0},
+                {' '}request timeout: {spotifyMatchDetails.addTracksChunkStats.requestTimeoutMs ?? 0}ms
               </p>
             )}
             {spotifyMatchDetails.matchedTracksSample.length > 0 && (

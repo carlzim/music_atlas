@@ -39,10 +39,17 @@ async function sleep(ms: number): Promise<void> {
 }
 
 const DEFAULT_PLAYLIST_TIMEOUT_MS = 45000;
+const DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS = 20000;
 
 function getPlaylistTimeoutMs(): number {
   const parsed = Number(process.env.PLAYLIST_TIMEOUT_MS || DEFAULT_PLAYLIST_TIMEOUT_MS);
   if (!Number.isFinite(parsed) || parsed < 10000) return DEFAULT_PLAYLIST_TIMEOUT_MS;
+  return Math.floor(parsed);
+}
+
+function getSpotifyAddTracksTimeoutMs(): number {
+  const parsed = Number(process.env.SPOTIFY_ADD_TRACKS_TIMEOUT_MS || DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS);
+  if (!Number.isFinite(parsed) || parsed < 5000) return DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS;
   return Math.floor(parsed);
 }
 
@@ -1045,6 +1052,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
     let addedToSpotifyCount = 0;
     const ADD_TRACKS_MAX_ATTEMPTS = 3;
+    const addTracksRequestTimeoutMs = getSpotifyAddTracksTimeoutMs();
     let addTracksAttemptsTotal = 0;
     let addTracksChunksRetried = 0;
     for (let chunkIndex = 0; chunkIndex < uriChunks.length; chunkIndex += 1) {
@@ -1057,6 +1065,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         addTracksAttemptsTotal += 1;
         let addTracksResponse: Response | null = null;
         let addTracksFetchError: string | null = null;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), addTracksRequestTimeoutMs);
         try {
           addTracksResponse = await fetch(addTracksUrl, {
             method: 'POST',
@@ -1065,9 +1075,15 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(addTracksBody),
+            signal: controller.signal,
           });
         } catch (error) {
-          addTracksFetchError = error instanceof Error ? error.message : String(error);
+          const isAbort = error instanceof DOMException && error.name === 'AbortError';
+          addTracksFetchError = isAbort
+            ? `request_timeout_after_${addTracksRequestTimeoutMs}ms`
+            : (error instanceof Error ? error.message : String(error));
+        } finally {
+          clearTimeout(timeoutId);
         }
 
         if (addTracksResponse?.ok) {
@@ -1116,6 +1132,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           failedChunkAttempt: attempt,
           failedChunkStatus: chunkFailureStatus,
           failedChunkError: addTracksFetchError,
+          failedChunkTimeoutMs: addTracksRequestTimeoutMs,
           addTracksAttemptsTotal,
           addTracksChunksRetried,
           addedTracks,
@@ -1154,6 +1171,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           totalChunks: uriChunks.length,
           addTracksAttemptsTotal,
           addTracksChunksRetried,
+          failedChunkTimeoutMs: addTracksRequestTimeoutMs,
           addedTracks,
           matched,
           skipped,
@@ -1174,6 +1192,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             totalChunks: uriChunks.length,
             totalAttempts: addTracksAttemptsTotal,
             retriedChunks: addTracksChunksRetried,
+            requestTimeoutMs: addTracksRequestTimeoutMs,
           },
         });
         return;
@@ -1208,6 +1227,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         totalChunks: uriChunks.length,
         totalAttempts: addTracksAttemptsTotal,
         retriedChunks: addTracksChunksRetried,
+        requestTimeoutMs: addTracksRequestTimeoutMs,
       },
     });
   } catch (error) {

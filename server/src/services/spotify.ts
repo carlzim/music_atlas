@@ -668,12 +668,25 @@ function getSongQueryFallbackTitles(song: string): string[] {
   const source = sanitizeQueryValue(cleanSongTitle(song) || song);
   if (!source) return [];
 
+  const withoutParentheses = source.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  const withoutPunctuation = source
+    .replace(/[,:;.!?]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normalizedWhitespace = source
+    .replace(/[\-–—\/|:]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
   const rawCandidates = [
     source,
     source.split(/\s*[-–—]\s*/)[0] || '',
     source.split(/\s*\/\s*/)[0] || '',
     source.split(/\s*:\s*/)[0] || '',
     source.split(/\s*\|\s*/)[0] || '',
+    withoutParentheses,
+    withoutPunctuation,
+    normalizedWhitespace,
   ];
 
   const unique = new Set<string>();

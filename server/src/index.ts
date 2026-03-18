@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
-import { searchTrack, searchTrackByIsrc, searchTrackCandidates, searchTrackCandidatesByIsrc } from './services/spotify.js';
+import { searchTrackByIsrc, searchTrackCandidates, searchTrackCandidatesByIsrc, searchTrackWithDiagnostics } from './services/spotify.js';
 import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUrl, updatePlaylistTrackSpotifyUrls } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
 import { resolveMusicBrainzRecordingMetadata } from './services/musicbrainz.js';
@@ -654,6 +654,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   let matchedViaIsrc = 0;
   let discoveredIsrcCount = 0;
   let searchedSpotifyMatches = 0;
+  let uncertainSearchMatches = 0;
   for (const track of trackQueries) {
     let matchedCurrentTrack = false;
     const existingUri = typeof track.spotify_url === 'string' ? spotifyUrlToUri(track.spotify_url) : null;
@@ -751,6 +752,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       let selectedUrl: string | null = null;
       let selectedUri: string | null = null;
       let selectedDurationMs: number | null = null;
+      let selectedScore: number | null = null;
 
       for (const candidate of candidates) {
         const candidateUrl = candidate.spotify_url;
@@ -763,11 +765,14 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         selectedDurationMs = typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms)
           ? candidate.duration_ms
           : null;
+        selectedScore = typeof candidate.score === 'number' && Number.isFinite(candidate.score)
+          ? candidate.score
+          : null;
         break;
       }
 
       if (!selectedUrl || !selectedUri) {
-        const spotifyInfo = await searchTrack(track.artist, track.song, playlist.prompt, recordingDurationMs);
+        const spotifyInfo = await searchTrackWithDiagnostics(track.artist, track.song, playlist.prompt, recordingDurationMs);
         if (spotifyInfo.spotify_url) {
           const fallbackUri = spotifyUrlToUri(spotifyInfo.spotify_url);
           if (fallbackUri && !usedUris.has(fallbackUri)) {
@@ -775,6 +780,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             selectedUri = fallbackUri;
             selectedDurationMs = typeof spotifyInfo.duration_ms === 'number' && Number.isFinite(spotifyInfo.duration_ms)
               ? spotifyInfo.duration_ms
+              : null;
+            selectedScore = typeof spotifyInfo.score === 'number' && Number.isFinite(spotifyInfo.score)
+              ? spotifyInfo.score
               : null;
           }
         }
@@ -784,6 +792,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         uris.push(selectedUri);
         usedUris.add(selectedUri);
         searchedSpotifyMatches += 1;
+        if (typeof selectedScore === 'number' && selectedScore <= 0) {
+          uncertainSearchMatches += 1;
+        }
         setRecordingSpotifyUrl(track.artist, track.song, selectedUrl);
         playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: selectedUrl });
         if (typeof selectedDurationMs === 'number' && Number.isFinite(selectedDurationMs) && selectedDurationMs > 0) {
@@ -817,6 +828,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   console.log('[spotify-save] matched via isrc:', matchedViaIsrc);
   console.log('[spotify-save] discovered isrc count:', discoveredIsrcCount);
   console.log('[spotify-save] searched spotify matches:', searchedSpotifyMatches);
+  console.log('[spotify-save] uncertain search matches:', uncertainSearchMatches);
   console.log('[spotify-save] first track uris:', dedupedUris.slice(0, 5));
 
   if (matched === 0) {
@@ -915,6 +927,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       matched,
       skipped,
       duplicateUriMatches,
+      uncertainMatches: uncertainSearchMatches,
       skippedTracks: skippedTracks.slice(0, 20),
       matchSources: {
         trackSpotifyUrl: reusedExistingSpotifyUrls,

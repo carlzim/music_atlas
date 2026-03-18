@@ -2206,19 +2206,28 @@ function staggerArtistsForFlow(tracks: Track[]): Track[] {
 
   const result: Track[] = [];
   let lastArtist: string | null = null;
+  let lastAlbum: string | null = null;
 
   while (result.length < tracks.length) {
     let selectedArtist: string | null = null;
     let selectedCount = -1;
+    let selectedAvoidedAlbum = false;
 
     for (const artistKey of artistOrder) {
       const queue = buckets.get(artistKey);
       const remaining = queue?.length || 0;
       if (remaining <= 0) continue;
       if (artistKey === lastArtist) continue;
-      if (remaining > selectedCount) {
+      const nextTrack = queue?.[0];
+      const nextAlbum = normalize(nextTrack?.album_image_url || '');
+      const avoidsAlbumRepeat = !lastAlbum || !nextAlbum || nextAlbum !== lastAlbum;
+      if (
+        remaining > selectedCount
+        || (remaining === selectedCount && avoidsAlbumRepeat && !selectedAvoidedAlbum)
+      ) {
         selectedArtist = artistKey;
         selectedCount = remaining;
+        selectedAvoidedAlbum = avoidsAlbumRepeat;
       }
     }
 
@@ -2240,6 +2249,8 @@ function staggerArtistsForFlow(tracks: Track[]): Track[] {
     if (!nextTrack) break;
     result.push(nextTrack);
     lastArtist = selectedArtist;
+    const currentAlbum = normalize(nextTrack.album_image_url || '');
+    lastAlbum = currentAlbum || null;
   }
 
   return result.length === tracks.length ? result : tracks;

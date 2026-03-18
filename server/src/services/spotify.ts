@@ -7,6 +7,10 @@ export interface SpotifyTrackInfo {
   duration_ms?: number | null;
 }
 
+export interface SpotifyTrackCandidateInfo extends SpotifyTrackInfo {
+  spotify_uri?: string | null;
+}
+
 export interface SpotifyTrackDebugInfo extends SpotifyTrackInfo {
   score: number | null;
   matchedTitle: string | null;
@@ -727,38 +731,65 @@ export async function searchTrackWithDiagnostics(
 }
 
 export async function searchTrackByIsrc(isrc: string): Promise<SpotifyTrackInfo> {
+  const candidates = await searchTrackCandidatesByIsrc(isrc, 1);
+  const best = candidates[0];
+  if (!best) {
+    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null };
+  }
+  return {
+    spotify_url: best.spotify_url,
+    album_image_url: best.album_image_url,
+    release_year: best.release_year,
+    duration_ms: best.duration_ms ?? null,
+  };
+}
+
+export async function searchTrackCandidatesByIsrc(isrc: string, limit = 5): Promise<SpotifyTrackCandidateInfo[]> {
   const normalized = String(isrc || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (normalized.length < 12) {
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null };
+    return [];
   }
 
   const token = await getAccessToken();
   if (!token) {
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null };
+    return [];
   }
 
   try {
     const result = await searchSpotify(`isrc:${normalized}`, token, 10);
     if (result.candidates.length === 0) {
-      return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null };
+      return [];
     }
 
-    const best = result.candidates
+    const ordered = result.candidates
       .slice()
       .sort((a, b) => {
         if (b.popularity !== a.popularity) return b.popularity - a.popularity;
         const aYear = typeof a.release_year === 'number' ? a.release_year : 0;
         const bYear = typeof b.release_year === 'number' ? b.release_year : 0;
         return bYear - aYear;
-      })[0];
+      });
 
-    return {
-      spotify_url: best?.spotify_url || null,
-      album_image_url: best?.album_image_url || null,
-      release_year: best?.release_year ?? null,
-      duration_ms: best?.duration_ms ?? null,
-    };
+    const seenUrls = new Set<string>();
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const output: SpotifyTrackCandidateInfo[] = [];
+
+    for (const item of ordered) {
+      const spotifyUrl = typeof item.spotify_url === 'string' ? item.spotify_url.trim() : '';
+      if (!spotifyUrl || seenUrls.has(spotifyUrl)) continue;
+      seenUrls.add(spotifyUrl);
+      output.push({
+        spotify_url: spotifyUrl,
+        spotify_uri: item.spotify_uri,
+        album_image_url: item.album_image_url,
+        release_year: item.release_year,
+        duration_ms: item.duration_ms,
+      });
+      if (output.length >= safeLimit) break;
+    }
+
+    return output;
   } catch {
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null };
+    return [];
   }
 }

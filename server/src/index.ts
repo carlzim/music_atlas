@@ -712,7 +712,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
     if (recordingIsrc) {
       try {
-        const spotifyIsrcCandidates = await searchTrackCandidatesByIsrc(recordingIsrc, 6);
+        const spotifyIsrcCandidates = await searchTrackCandidatesByIsrc(recordingIsrc, 6, recordingDurationMs);
         let isrcCollisionCount = 0;
         for (const candidate of spotifyIsrcCandidates) {
           if (!candidate.spotify_url) continue;
@@ -743,7 +743,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
         if (matchedCurrentTrack) continue;
 
-        const spotifyByIsrc = await searchTrackByIsrc(recordingIsrc);
+        const spotifyByIsrc = await searchTrackByIsrc(recordingIsrc, recordingDurationMs);
         if (spotifyByIsrc.spotify_url) {
           const uri = spotifyUrlToUri(spotifyByIsrc.spotify_url);
           if (uri && !usedUris.has(uri)) {

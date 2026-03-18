@@ -474,6 +474,8 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
     const fallbackQuery = safeVenue
       ? `${safeSong} ${safeArtist} ${safeVenue}`.trim()
       : `${safeSong} ${safeArtist}`.trim();
+    const titleOnlyStructuredQuery = `track:"${safeSong}"`;
+    const titleOnlyFallbackQuery = safeSong;
 
     if (!loggedSpotifyFinalQuery) {
       console.log(`[Spotify] Final query (primary): ${structuredQuery}`);
@@ -493,6 +495,12 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
         if (result.candidates.length === 0 && !result.rateLimitedAbort) {
           result = await searchSpotify(baseFallbackQuery, token, 10);
         }
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(titleOnlyStructuredQuery, token, 10);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(titleOnlyFallbackQuery, token, 10);
       }
       cacheEntry = {
         candidates: result.candidates,

@@ -60,6 +60,42 @@ Allowed values: `truth-first`, `hybrid`, `gemini-first`.
 - `POST /api/evidence/backfill-credit`: MusicBrainz credit evidence backfill.
 - `POST /api/evidence/backfill-credit-truth`: Discogs truth-credit backfill.
 
+### Spotify save diagnostics (dev/prod)
+
+Endpoint: `POST /api/spotify/save-playlist/:id`
+
+On partial or failed add-tracks calls, the response includes structured diagnostics to explain what happened.
+
+- `failedChunkCategory`: high-level bucket for failure cause.
+  - `request_timeout`: local request timed out before Spotify responded.
+  - `network_error`: fetch/network issue that was not a timeout.
+  - `rate_limited`: Spotify returned `429`.
+  - `spotify_server_error`: Spotify returned `5xx`.
+  - `spotify_client_error`: Spotify returned `4xx` (non-429).
+  - `unknown_error`: fallback when no better classification is available.
+- `failedChunkTransient`: whether the failing status/error was treated as retryable.
+- `failedChunkIndex`, `totalChunks`, `failedChunkAttempt`, `failedChunkStatus`, `failedChunkTimeoutMs`, `failedChunkError`: low-level details for the exact failing chunk request.
+- `addTracksChunkStats`: aggregate retry metrics for the save operation.
+  - `totalChunks`, `totalAttempts`, `retriedChunks`
+  - `retryDelayTotalMs`, `retryDelayAverageMs`, `retryDelayMaxMs`
+  - `retryAfterRetries` (Spotify `Retry-After`) and `backoffRetries` (local exponential backoff)
+  - `requestTimeoutMs`, `maxAttempts`, `baseRetryDelayMs`, `maxRetryDelayMs`
+
+Quick interpretation guide:
+
+- High `rate_limited` + high `retryAfterRetries`: Spotify throttling; consider fewer concurrent saves or longer retry windows.
+- High `request_timeout` + low `retryAfterRetries`: network latency/instability or timeout too low for current conditions.
+- High `spotify_server_error`: transient Spotify instability.
+- `retryDelayMaxMs` much larger than `retryDelayAverageMs`: a few severe spikes drove most wait time.
+- `totalAttempts` close to `totalChunks * maxAttempts`: retry budget is nearly exhausted.
+
+Retry tuning knobs (`server/.env`):
+
+- `SPOTIFY_ADD_TRACKS_TIMEOUT_MS` (min 5000)
+- `SPOTIFY_ADD_TRACKS_MAX_ATTEMPTS` (clamped to 1..5)
+- `SPOTIFY_ADD_TRACKS_BASE_RETRY_DELAY_MS` (min 100)
+- `SPOTIFY_ADD_TRACKS_MAX_RETRY_DELAY_MS` (min 500)
+
 ## If A Check Fails
 
 1. Run `npm run eval:coverage` to inspect current counts.

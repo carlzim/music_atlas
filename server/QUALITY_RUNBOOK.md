@@ -130,6 +130,16 @@ Current ranking intentionally prefers canonical versions unless prompts explicit
 
 This keeps default user requests closer to standard/canonical recordings while preserving expected behavior for explicit variant prompts.
 
+Canonical-first variant policy (current):
+
+- Candidates are bucketed and selected in this order:
+  1. `canonical`
+  2. `fallback_live`
+  3. `avoid`
+- `soundtrack` and `remix` variants are treated as `avoid` unless prompt intent explicitly allows them.
+- `live` variants are treated as `fallback_live` for normal prompts, and promoted when prompt/venue intent is explicitly live-focused.
+- `remaster`/`mix` are generally allowed as canonical-safe variants (to avoid dropping valid modern official releases).
+
 ### Artist parsing and collaborator matching (v1)
 
 Recent matching work adds safer handling for truncated artist names and collaboration text.

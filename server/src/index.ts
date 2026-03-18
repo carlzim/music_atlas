@@ -1091,6 +1091,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
         res.status(500).json({
           error: 'Playlist created, but failed to add tracks',
+          partialPlaylistCreated: true,
+          spotifyPlaylistId: created.id,
+          spotifyPlaylistUrl: created.external_urls?.spotify || null,
           addedBeforeFailure: addedToSpotifyCount,
           failedChunkIndex: chunkIndex + 1,
           totalChunks: uriChunks.length,
@@ -1103,6 +1106,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       if (!chunkAdded) {
         res.status(500).json({
           error: 'Playlist created, but failed to add tracks',
+          partialPlaylistCreated: true,
+          spotifyPlaylistId: created.id,
+          spotifyPlaylistUrl: created.external_urls?.spotify || null,
           addedBeforeFailure: addedToSpotifyCount,
           failedChunkIndex: chunkIndex + 1,
           totalChunks: uriChunks.length,

@@ -1019,6 +1019,12 @@ function PlaylistPage() {
       }
 
       if (!response.ok) {
+        const partialSpotifyPlaylistUrl = typeof data?.spotifyPlaylistUrl === 'string' && data.spotifyPlaylistUrl.trim().length > 0
+          ? data.spotifyPlaylistUrl.trim()
+          : null;
+        if (partialSpotifyPlaylistUrl) {
+          setSpotifyPlaylistUrl(partialSpotifyPlaylistUrl);
+        }
         const skipReasonCounts = data?.skipReasonCounts && typeof data.skipReasonCounts === 'object'
           ? Object.entries(data.skipReasonCounts as Record<string, unknown>)
               .filter(([, value]) => typeof value === 'number' && Number.isFinite(value) && value > 0)
@@ -1035,6 +1041,7 @@ function PlaylistPage() {
           ? data.error.trim()
           : 'Failed to save playlist to Spotify';
         const detailParts = [
+          partialSpotifyPlaylistUrl ? 'partial Spotify playlist was created' : '',
           chunkFailureSummary,
           skipReasonCounts.length > 0 ? `skip reasons: ${skipReasonCounts.join(', ')}` : '',
         ].filter((part) => part.length > 0);

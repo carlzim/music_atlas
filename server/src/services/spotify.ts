@@ -11,12 +11,14 @@ export interface SpotifyTrackInfo {
 export interface SpotifyTrackCandidateInfo extends SpotifyTrackInfo {
   spotify_uri?: string | null;
   score?: number | null;
+  artist_match_mode?: 'exact' | 'prefix' | 'other';
 }
 
 export interface SpotifyTrackDebugInfo extends SpotifyTrackInfo {
   score: number | null;
   matchedTitle: string | null;
   matchedAlbumTitle: string | null;
+  artist_match_mode?: 'exact' | 'prefix' | 'other';
 }
 
 interface SpotifyCandidate {
@@ -39,6 +41,7 @@ interface SpotifySearchResult {
 
 interface RankedSpotifyCandidate extends SpotifyCandidate {
   score: number;
+  artist_match_mode: 'exact' | 'prefix' | 'other';
 }
 
 interface ArtistSearchCacheEntry {
@@ -680,13 +683,13 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
   
   if (!token) {
     console.log('[Spotify] No token - skipping search');
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null };
+    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
   }
 
   const explicitVenue = extractExplicitVenue(promptContext);
   const artistCacheKey = getArtistCacheKey(artist, song, promptContext);
   if (!artistCacheKey) {
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null };
+    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
   }
 
   let cacheEntry = artistSearchCache.get(artistCacheKey);
@@ -763,13 +766,13 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
       artistSearchCache.set(artistCacheKey, cacheEntry);
     } catch (e) {
       console.error('[Spotify] Artist search error:', e);
-      return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null };
+      return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
     }
   }
 
   if (!cacheEntry || cacheEntry.rateLimitedAbort) {
     console.warn('[Spotify] Skipping match due to prior rate limit for this artist');
-    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null };
+    return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
   }
 
   const rankedCandidates = rankSpotifyCandidates(artist, song, promptContext, cacheEntry.candidates, explicitVenue, targetDurationMs);
@@ -786,11 +789,12 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
       score: bestCandidate.score,
       matchedTitle: bestCandidate.title || null,
       matchedAlbumTitle: bestCandidate.album_title || null,
+      artist_match_mode: bestCandidate.artist_match_mode,
     };
   }
 
   console.log('[Spotify] No match found');
-  return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null };
+  return { spotify_url: null, album_image_url: null, release_year: null, duration_ms: null, score: null, matchedTitle: null, matchedAlbumTitle: null, artist_match_mode: undefined };
 }
 
 function rankSpotifyCandidates(
@@ -811,11 +815,21 @@ function rankSpotifyCandidates(
   const allowsRemixVariants = /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/.test(normalizedPromptContext)
     || /\bremix(?:es)?\b|\bedit\b|\brework\b|\bmashup\b|\bflip\b/.test(normalizedRequestedSong);
   const allowTitleSuffix = Boolean(explicitVenue);
+  const requested = getRequestedArtistKeys(artist);
+  const requestedPrimaryArtistKeys = getArtistMatchKeys(requested.primaryArtist);
 
   const ranked: RankedSpotifyCandidate[] = [];
   for (const candidate of candidates) {
     const validation = validateCandidateMatch(artist, song, candidate, allowTitleSuffix);
     if (!validation.ok) continue;
+    const candidatePrimaryArtistKeys = candidate.artists.length > 0
+      ? Array.from(getArtistMatchKeys(candidate.artists[0]))
+      : [];
+    const hasPrimaryArtistMatch = Array.from(requestedPrimaryArtistKeys).some((key) => candidatePrimaryArtistKeys.includes(key));
+    const hasLoosePrimaryPrefixMatch = !hasPrimaryArtistMatch && hasLoosePrimaryArtistPrefixMatch(requested.primaryArtist, candidate);
+    const artistMatchMode: 'exact' | 'prefix' | 'other' = hasPrimaryArtistMatch
+      ? 'exact'
+      : (hasLoosePrimaryPrefixMatch ? 'prefix' : 'other');
     const score = scoreSpotifyCandidate(
       artist,
       song,
@@ -829,7 +843,7 @@ function rankSpotifyCandidates(
       allowsRemixVariants,
       targetDurationMs
     );
-    ranked.push({ ...candidate, score });
+    ranked.push({ ...candidate, score, artist_match_mode: artistMatchMode });
   }
 
   ranked.sort((a, b) => {
@@ -971,6 +985,7 @@ export async function searchTrackCandidates(
       release_year: item.release_year,
       duration_ms: item.duration_ms,
       score: item.score,
+      artist_match_mode: item.artist_match_mode,
     });
   }
 

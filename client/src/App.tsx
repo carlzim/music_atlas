@@ -921,6 +921,12 @@ function PlaylistPage() {
     };
     failedChunkCategory?: string;
     failedChunkTransient?: boolean;
+    failedChunkIndex?: number;
+    failedChunkTotal?: number;
+    failedChunkAttempt?: number;
+    failedChunkStatus?: string;
+    failedChunkTimeoutMs?: number;
+    failedChunkError?: string;
   } | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1089,6 +1095,24 @@ function PlaylistPage() {
         : undefined,
       failedChunkCategory: typeof payload.failedChunkCategory === 'string' ? payload.failedChunkCategory : undefined,
       failedChunkTransient: typeof payload.failedChunkTransient === 'boolean' ? payload.failedChunkTransient : undefined,
+      failedChunkIndex: typeof payload.failedChunkIndex === 'number' && Number.isFinite(payload.failedChunkIndex)
+        ? Math.max(1, Math.floor(payload.failedChunkIndex))
+        : undefined,
+      failedChunkTotal: typeof payload.totalChunks === 'number' && Number.isFinite(payload.totalChunks)
+        ? Math.max(1, Math.floor(payload.totalChunks))
+        : undefined,
+      failedChunkAttempt: typeof payload.failedChunkAttempt === 'number' && Number.isFinite(payload.failedChunkAttempt)
+        ? Math.max(1, Math.floor(payload.failedChunkAttempt))
+        : undefined,
+      failedChunkStatus: (typeof payload.failedChunkStatus === 'number' || typeof payload.failedChunkStatus === 'string')
+        ? String(payload.failedChunkStatus)
+        : undefined,
+      failedChunkTimeoutMs: typeof payload.failedChunkTimeoutMs === 'number' && Number.isFinite(payload.failedChunkTimeoutMs)
+        ? Math.max(0, Math.floor(payload.failedChunkTimeoutMs))
+        : undefined,
+      failedChunkError: typeof payload.failedChunkError === 'string' && payload.failedChunkError.trim().length > 0
+        ? payload.failedChunkError.trim()
+        : undefined,
     };
   };
 
@@ -1327,6 +1351,16 @@ function PlaylistPage() {
                 {' '}transient: {typeof spotifyMatchDetails.failedChunkTransient === 'boolean'
                   ? (spotifyMatchDetails.failedChunkTransient ? 'yes' : 'no')
                   : 'unknown'}
+              </p>
+            )}
+            {(spotifyMatchDetails.failedChunkIndex || spotifyMatchDetails.failedChunkStatus || spotifyMatchDetails.failedChunkError) && (
+              <p>
+                Failed chunk details:
+                {' '}chunk {spotifyMatchDetails.failedChunkIndex ?? 'n/a'}/{spotifyMatchDetails.failedChunkTotal ?? 'n/a'},
+                {' '}attempt {spotifyMatchDetails.failedChunkAttempt ?? 'n/a'},
+                {' '}status {spotifyMatchDetails.failedChunkStatus ?? 'n/a'},
+                {' '}timeout {spotifyMatchDetails.failedChunkTimeoutMs ?? 0}ms,
+                {' '}error {spotifyMatchDetails.failedChunkError ?? 'none'}
               </p>
             )}
             {spotifyMatchDetails.matchedTracksSample.length > 0 && (

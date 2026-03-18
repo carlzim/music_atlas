@@ -846,7 +846,10 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           if (!candidateUri) continue;
           const candidateUrl = candidate.spotify_url || spotifyUriToUrl(candidateUri);
           if (!candidateUrl) continue;
-          if (usedUris.has(candidateUri)) continue;
+          if (usedUris.has(candidateUri)) {
+            candidateUriCollisionCount += 1;
+            continue;
+          }
           selectedUrl = candidateUrl;
           selectedUri = candidateUri;
           selectedDurationMs = typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms)

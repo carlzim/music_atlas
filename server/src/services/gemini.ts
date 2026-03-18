@@ -2140,6 +2140,42 @@ function applyCreditOnlyArtistDiversity(prompt: string, tracks: Track[]): Track[
   return chosen.length > 0 ? chosen : tracks;
 }
 
+function applyGeneralArtistDiversity(tracks: Track[]): Track[] {
+  if (tracks.length <= 1) return tracks;
+
+  const desiredCount = Math.min(MAX_PLAYLIST_TRACKS, tracks.length);
+  const chosen: Track[] = [];
+  const chosenKeys = new Set<string>();
+  const artistCounts = new Map<string, number>();
+
+  const getTrackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
+
+  const addWithArtistCap = (artistCap: number): void => {
+    for (const track of tracks) {
+      if (chosen.length >= desiredCount) break;
+
+      const trackKey = getTrackKey(track);
+      if (!trackKey || chosenKeys.has(trackKey)) continue;
+
+      const artistKey = normalize(track.artist);
+      if (!artistKey) continue;
+
+      const artistCount = artistCounts.get(artistKey) || 0;
+      if (artistCount >= artistCap) continue;
+
+      chosen.push(track);
+      chosenKeys.add(trackKey);
+      artistCounts.set(artistKey, artistCount + 1);
+    }
+  };
+
+  addWithArtistCap(1);
+  if (chosen.length < desiredCount) addWithArtistCap(2);
+  if (chosen.length < desiredCount) addWithArtistCap(3);
+
+  return chosen.length > 0 ? chosen : tracks;
+}
+
 function promptAllowsCreditVariants(prompt: string): boolean {
   const text = normalize(prompt);
   if (!text) return false;
@@ -3092,6 +3128,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   }
 
   playlist.tracks = constraint ? verifiedTracks : candidateTracks;
+  if (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit')) {
+    playlist.tracks = applyGeneralArtistDiversity(playlist.tracks);
+  }
   playlist.tracks = await sortTracksChronologicallyIfNeeded(translatedPrompt, playlist.tracks);
   if (playlist.tracks.length > MAX_PLAYLIST_TRACKS) {
     playlist.tracks = playlist.tracks.slice(0, MAX_PLAYLIST_TRACKS);

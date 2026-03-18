@@ -349,10 +349,16 @@ function scoreSpotifyCandidate(
   const cleanedRequestedTitle = normalizeTitleKey(cleanSongTitle(song));
   const candidateTitle = normalizeTitleKey(candidate.title);
   const candidateArtists = candidate.artists.flatMap((candidateArtist) => Array.from(getArtistMatchKeys(candidateArtist)));
+  const candidatePrimaryArtistKeys = candidate.artists.length > 0
+    ? Array.from(getArtistMatchKeys(candidate.artists[0]))
+    : [];
   const albumTitle = normalizeForMatch(candidate.album_title || '');
   const titleAndAlbum = `${candidateTitle} ${albumTitle}`;
 
-  if (Array.from(requestedArtistKeys).some((key) => candidateArtists.includes(key))) score += 3;
+  const hasAnyArtistMatch = Array.from(requestedArtistKeys).some((key) => candidateArtists.includes(key));
+  const hasPrimaryArtistMatch = Array.from(requestedArtistKeys).some((key) => candidatePrimaryArtistKeys.includes(key));
+  if (hasAnyArtistMatch) score += 3;
+  if (hasPrimaryArtistMatch) score += 2;
   if (candidateTitle === requestedTitle) {
     score += 3;
   } else if (candidateTitle === cleanedRequestedTitle) {

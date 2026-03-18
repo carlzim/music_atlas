@@ -142,6 +142,59 @@ function normalizeTitleKey(value: string): string {
     .trim();
 }
 
+function normalizeLooseTitleTokens(value: string): string[] {
+  return stripDiacritics(value)
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/\b(part|pt)\.?\s+([ivx]+|\d+)\b/g, '$1 $2')
+    .replace(/\b([ivx]+)\b/g, (token) => {
+      switch (token) {
+        case 'i': return '1';
+        case 'ii': return '2';
+        case 'iii': return '3';
+        case 'iv': return '4';
+        case 'v': return '5';
+        case 'vi': return '6';
+        case 'vii': return '7';
+        case 'viii': return '8';
+        case 'ix': return '9';
+        case 'x': return '10';
+        default: return token;
+      }
+    })
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0)
+    .filter((token) => !/^(the|a|an|and|of|pt|part|version|mix|edit|remaster|remastered|live|demo|instrumental|karaoke)$/.test(token));
+}
+
+function hasLooseTitleTokenMatch(baseTitle: string, candidateTitle: string): boolean {
+  if (!baseTitle || !candidateTitle) return false;
+  const baseTokens = normalizeLooseTitleTokens(baseTitle);
+  const candidateTokens = normalizeLooseTitleTokens(candidateTitle);
+  if (baseTokens.length < 2 || candidateTokens.length < 2) return false;
+  const baseSet = new Set(baseTokens);
+  const candidateSet = new Set(candidateTokens);
+  let overlap = 0;
+  for (const token of baseSet) {
+    if (candidateSet.has(token)) overlap += 1;
+  }
+  const overlapRatio = overlap / Math.max(baseSet.size, candidateSet.size);
+  return overlapRatio >= 0.75;
+}
+
+function hasAllowedVersionSuffix(baseTitle: string, candidateTitle: string): boolean {
+  if (!baseTitle || candidateTitle.length <= baseTitle.length) return false;
+  if (!candidateTitle.startsWith(`${baseTitle} `)) return false;
+  const suffix = candidateTitle.slice(baseTitle.length).trim();
+  if (!suffix) return false;
+  const compactSuffix = suffix.replace(/^[-\s]+/, '').trim();
+  const tokenCount = compactSuffix.split(' ').filter(Boolean).length;
+  if (tokenCount === 0 || tokenCount > 8) return false;
+  return /\b(remaster(?:ed)?|mix|edit|version|mono|stereo|acoustic|instrumental|karaoke|live|session|demo|deluxe|expanded|anniversary|explicit|clean|single|take)\b/.test(compactSuffix);
+}
+
 function getArtistMatchKeys(value: string): Set<string> {
   const display = canonicalizeDisplayName(value);
   const keys = new Set<string>();
@@ -174,40 +227,6 @@ function validateCandidateMatch(
   const requestedTitle = normalizeTitleKey(song);
   const cleanedRequestedTitle = normalizeTitleKey(cleanSongTitle(song));
   const candidateTitle = normalizeTitleKey(candidate.title);
-  const normalizeLooseTitleTokens = (value: string): string[] => {
-    return stripDiacritics(value)
-      .toLowerCase()
-      .replace(/[’']/g, '')
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/g)
-      .map((token) => token.trim())
-      .filter((token) => token.length > 0)
-      .filter((token) => !/^(the|a|an|and|of|pt|part|version|mix|edit|remaster|remastered|live|demo|instrumental|karaoke)$/.test(token));
-  };
-  const hasLooseTitleTokenMatch = (baseTitle: string): boolean => {
-    if (!baseTitle || !candidateTitle) return false;
-    const baseTokens = normalizeLooseTitleTokens(baseTitle);
-    const candidateTokens = normalizeLooseTitleTokens(candidateTitle);
-    if (baseTokens.length < 2 || candidateTokens.length < 2) return false;
-    const baseSet = new Set(baseTokens);
-    const candidateSet = new Set(candidateTokens);
-    let overlap = 0;
-    for (const token of baseSet) {
-      if (candidateSet.has(token)) overlap += 1;
-    }
-    const overlapRatio = overlap / Math.max(baseSet.size, candidateSet.size);
-    return overlapRatio >= 0.75;
-  };
-  const hasAllowedVersionSuffix = (baseTitle: string): boolean => {
-    if (!baseTitle || candidateTitle.length <= baseTitle.length) return false;
-    if (!candidateTitle.startsWith(`${baseTitle} `)) return false;
-    const suffix = candidateTitle.slice(baseTitle.length).trim();
-    if (!suffix) return false;
-    const compactSuffix = suffix.replace(/^[-\s]+/, '').trim();
-    const tokenCount = compactSuffix.split(' ').filter(Boolean).length;
-    if (tokenCount === 0 || tokenCount > 8) return false;
-    return /\b(remaster(?:ed)?|mix|edit|version|mono|stereo|acoustic|instrumental|karaoke|live|session|demo|deluxe|expanded|anniversary|explicit|clean|single|take)\b/.test(compactSuffix);
-  };
 
   const hasRequestedPrefix = allowTitleSuffix
     && (
@@ -215,11 +234,11 @@ function validateCandidateMatch(
       || (cleanedRequestedTitle.length > 0 && (candidateTitle === cleanedRequestedTitle || candidateTitle.startsWith(`${cleanedRequestedTitle} `)))
     );
   const hasVersionSuffixMatch =
-    (requestedTitle.length > 0 && hasAllowedVersionSuffix(requestedTitle))
-    || (cleanedRequestedTitle.length > 0 && hasAllowedVersionSuffix(cleanedRequestedTitle));
+    (requestedTitle.length > 0 && hasAllowedVersionSuffix(requestedTitle, candidateTitle))
+    || (cleanedRequestedTitle.length > 0 && hasAllowedVersionSuffix(cleanedRequestedTitle, candidateTitle));
   const hasLooseTitleMatch =
-    (requestedTitle.length > 0 && hasLooseTitleTokenMatch(requestedTitle))
-    || (cleanedRequestedTitle.length > 0 && hasLooseTitleTokenMatch(cleanedRequestedTitle));
+    (requestedTitle.length > 0 && hasLooseTitleTokenMatch(requestedTitle, candidateTitle))
+    || (cleanedRequestedTitle.length > 0 && hasLooseTitleTokenMatch(cleanedRequestedTitle, candidateTitle));
   const titleOk = candidateTitle === requestedTitle
     || candidateTitle === cleanedRequestedTitle
     || hasRequestedPrefix
@@ -326,6 +345,18 @@ function scoreSpotifyCandidate(
     score += 3;
   } else if (candidateTitle === cleanedRequestedTitle) {
     score += 1;
+  } else {
+    const hasVersionSuffixMatch =
+      (requestedTitle.length > 0 && hasAllowedVersionSuffix(requestedTitle, candidateTitle))
+      || (cleanedRequestedTitle.length > 0 && hasAllowedVersionSuffix(cleanedRequestedTitle, candidateTitle));
+    const hasLooseTitleMatch =
+      (requestedTitle.length > 0 && hasLooseTitleTokenMatch(requestedTitle, candidateTitle))
+      || (cleanedRequestedTitle.length > 0 && hasLooseTitleTokenMatch(cleanedRequestedTitle, candidateTitle));
+    if (hasVersionSuffixMatch) {
+      score += 1;
+    } else if (hasLooseTitleMatch) {
+      score += 1;
+    }
   }
 
   if (promptAlbumTokens.size > 0 && albumTitle) {

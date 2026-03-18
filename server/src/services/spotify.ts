@@ -524,6 +524,8 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
     const fallbackQuery = safeVenue
       ? `${safeSong} ${safeArtist} ${safeVenue}`.trim()
       : `${safeSong} ${safeArtist}`.trim();
+    const artistOnlyStructuredQuery = `artist:"${safeArtist}"`;
+    const artistOnlyFallbackQuery = safeArtist;
     const titleOnlyStructuredQuery = `track:"${safeSong}"`;
     const titleOnlyFallbackQuery = safeSong;
 
@@ -545,6 +547,12 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
         if (result.candidates.length === 0 && !result.rateLimitedAbort) {
           result = await searchSpotify(baseFallbackQuery, token, 10);
         }
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(artistOnlyStructuredQuery, token, 10);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(artistOnlyFallbackQuery, token, 10);
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(titleOnlyStructuredQuery, token, 10);
@@ -646,6 +654,8 @@ export async function searchTrackCandidateUrls(
     const fallbackQuery = safeVenue
       ? `${safeSong} ${safeArtist} ${safeVenue}`.trim()
       : `${safeSong} ${safeArtist}`.trim();
+    const artistOnlyStructuredQuery = `artist:"${safeArtist}"`;
+    const artistOnlyFallbackQuery = safeArtist;
     const titleOnlyStructuredQuery = `track:"${safeSong}"`;
     const titleOnlyFallbackQuery = safeSong;
 
@@ -661,6 +671,12 @@ export async function searchTrackCandidateUrls(
         if (result.candidates.length === 0 && !result.rateLimitedAbort) {
           result = await searchSpotify(baseFallbackQuery, token, 10);
         }
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(artistOnlyStructuredQuery, token, 10);
+      }
+      if (result.candidates.length === 0 && !result.rateLimitedAbort) {
+        result = await searchSpotify(artistOnlyFallbackQuery, token, 10);
       }
       if (result.candidates.length === 0 && !result.rateLimitedAbort) {
         result = await searchSpotify(titleOnlyStructuredQuery, token, 10);

@@ -911,6 +911,9 @@ function PlaylistPage() {
       totalChunks?: number;
       totalAttempts?: number;
       retriedChunks?: number;
+      retryDelayTotalMs?: number;
+      retryAfterRetries?: number;
+      backoffRetries?: number;
       requestTimeoutMs?: number;
       maxAttempts?: number;
       baseRetryDelayMs?: number;
@@ -1069,10 +1072,13 @@ function PlaylistPage() {
         ? payload.matchSources as { trackSpotifyUrl?: number; recordingSpotifyUrl?: number; isrc?: number; search?: number }
         : undefined,
       addTracksChunkStats: payload.addTracksChunkStats && typeof payload.addTracksChunkStats === 'object'
-        ? payload.addTracksChunkStats as {
+          ? payload.addTracksChunkStats as {
             totalChunks?: number;
             totalAttempts?: number;
             retriedChunks?: number;
+            retryDelayTotalMs?: number;
+            retryAfterRetries?: number;
+            backoffRetries?: number;
             requestTimeoutMs?: number;
             maxAttempts?: number;
             baseRetryDelayMs?: number;
@@ -1294,6 +1300,9 @@ function PlaylistPage() {
                 Spotify add-tracks chunks: {spotifyMatchDetails.addTracksChunkStats.totalChunks ?? 0},
                 {' '}attempts: {spotifyMatchDetails.addTracksChunkStats.totalAttempts ?? 0},
                 {' '}retries: {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0},
+                {' '}retry delay total: {spotifyMatchDetails.addTracksChunkStats.retryDelayTotalMs ?? 0}ms,
+                {' '}retry-after retries: {spotifyMatchDetails.addTracksChunkStats.retryAfterRetries ?? 0},
+                {' '}backoff retries: {spotifyMatchDetails.addTracksChunkStats.backoffRetries ?? 0},
                 {' '}request timeout: {spotifyMatchDetails.addTracksChunkStats.requestTimeoutMs ?? 0}ms,
                 {' '}max attempts: {spotifyMatchDetails.addTracksChunkStats.maxAttempts ?? 0},
                 {' '}base retry delay: {spotifyMatchDetails.addTracksChunkStats.baseRetryDelayMs ?? 0}ms,

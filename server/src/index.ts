@@ -1078,6 +1078,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     const addTracksRequestTimeoutMs = getSpotifyAddTracksTimeoutMs();
     let addTracksAttemptsTotal = 0;
     let addTracksChunksRetried = 0;
+    let addTracksRetryDelayTotalMs = 0;
+    let addTracksRetryAfterRetries = 0;
+    let addTracksBackoffRetries = 0;
     for (let chunkIndex = 0; chunkIndex < uriChunks.length; chunkIndex += 1) {
       const chunk = uriChunks[chunkIndex];
       const addTracksBody = { uris: chunk };
@@ -1127,7 +1130,8 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         const isTransientChunkError = !addTracksResponse || addTracksResponse.status === 429 || addTracksResponse.status >= 500;
         const retryAfterHeader = addTracksResponse?.headers.get('Retry-After') || null;
         const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
-        const retryDelayMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+        const usesRetryAfter = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0;
+        const retryDelayMs = usesRetryAfter
           ? Math.max(500, Math.floor(retryAfterSeconds * 1000))
           : Math.min(addTracksMaxRetryDelayMs, addTracksBaseRetryDelayMs * Math.pow(2, attempt - 1));
 
@@ -1140,6 +1144,12 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
 
         if (isTransientChunkError && attempt < addTracksMaxAttempts) {
           addTracksChunksRetried += 1;
+          addTracksRetryDelayTotalMs += retryDelayMs;
+          if (usesRetryAfter) {
+            addTracksRetryAfterRetries += 1;
+          } else {
+            addTracksBackoffRetries += 1;
+          }
           await sleep(retryDelayMs);
           continue;
         }
@@ -1178,6 +1188,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             totalChunks: uriChunks.length,
             totalAttempts: addTracksAttemptsTotal,
             retriedChunks: addTracksChunksRetried,
+            retryDelayTotalMs: addTracksRetryDelayTotalMs,
+            retryAfterRetries: addTracksRetryAfterRetries,
+            backoffRetries: addTracksBackoffRetries,
             requestTimeoutMs: addTracksRequestTimeoutMs,
             maxAttempts: addTracksMaxAttempts,
             baseRetryDelayMs: addTracksBaseRetryDelayMs,
@@ -1219,6 +1232,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             totalChunks: uriChunks.length,
             totalAttempts: addTracksAttemptsTotal,
             retriedChunks: addTracksChunksRetried,
+            retryDelayTotalMs: addTracksRetryDelayTotalMs,
+            retryAfterRetries: addTracksRetryAfterRetries,
+            backoffRetries: addTracksBackoffRetries,
             requestTimeoutMs: addTracksRequestTimeoutMs,
             maxAttempts: addTracksMaxAttempts,
             baseRetryDelayMs: addTracksBaseRetryDelayMs,
@@ -1257,6 +1273,9 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         totalChunks: uriChunks.length,
         totalAttempts: addTracksAttemptsTotal,
         retriedChunks: addTracksChunksRetried,
+        retryDelayTotalMs: addTracksRetryDelayTotalMs,
+        retryAfterRetries: addTracksRetryAfterRetries,
+        backoffRetries: addTracksBackoffRetries,
         requestTimeoutMs: addTracksRequestTimeoutMs,
         maxAttempts: addTracksMaxAttempts,
         baseRetryDelayMs: addTracksBaseRetryDelayMs,

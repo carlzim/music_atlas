@@ -907,6 +907,13 @@ function PlaylistPage() {
       isrc?: number;
       search?: number;
     };
+    searchScoreBands?: {
+      strong?: number;
+      good?: number;
+      weak?: number;
+      uncertain?: number;
+      unknown?: number;
+    };
     addTracksChunkStats?: {
       totalChunks?: number;
       totalAttempts?: number;
@@ -1080,6 +1087,15 @@ function PlaylistPage() {
         : [],
       matchSources: payload.matchSources && typeof payload.matchSources === 'object'
         ? payload.matchSources as { trackSpotifyUrl?: number; recordingSpotifyUrl?: number; isrc?: number; search?: number }
+        : undefined,
+      searchScoreBands: payload.searchScoreBands && typeof payload.searchScoreBands === 'object'
+        ? payload.searchScoreBands as {
+            strong?: number;
+            good?: number;
+            weak?: number;
+            uncertain?: number;
+            unknown?: number;
+          }
         : undefined,
       addTracksChunkStats: payload.addTracksChunkStats && typeof payload.addTracksChunkStats === 'object'
           ? payload.addTracksChunkStats as {
@@ -1385,6 +1401,15 @@ function PlaylistPage() {
               {' '}ISRC {spotifyMatchDetails.matchSources?.isrc ?? 0},
               {' '}search {spotifyMatchDetails.matchSources?.search ?? 0}
             </p>
+            {spotifyMatchDetails.searchScoreBands && (
+              <p>
+                Search score bands: strong {spotifyMatchDetails.searchScoreBands.strong ?? 0},
+                {' '}good {spotifyMatchDetails.searchScoreBands.good ?? 0},
+                {' '}weak {spotifyMatchDetails.searchScoreBands.weak ?? 0},
+                {' '}uncertain {spotifyMatchDetails.searchScoreBands.uncertain ?? 0},
+                {' '}unknown {spotifyMatchDetails.searchScoreBands.unknown ?? 0}
+              </p>
+            )}
             {spotifyMatchDetails.addTracksChunkStats && (
               <>
                 <p>

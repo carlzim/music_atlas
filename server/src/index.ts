@@ -1105,6 +1105,27 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           failedChunkStatus: addTracksResponse.status,
           addTracksAttemptsTotal,
           addTracksChunksRetried,
+          addedTracks,
+          matched,
+          skipped,
+          duplicateUriMatches,
+          uncertainMatches: uncertainSearchMatches,
+          uncertainTracks: uncertainTracks.slice(0, 20),
+          matchedTracksSample: matchedTracks.slice(0, 20),
+          skippedTracksTotal: skippedTracks.length,
+          skipReasonCounts,
+          skippedTracks: skippedTracks.slice(0, 20),
+          matchSources: {
+            trackSpotifyUrl: reusedExistingSpotifyUrls,
+            recordingSpotifyUrl: reusedRecordingSpotifyUrls,
+            isrc: matchedViaIsrc,
+            search: searchedSpotifyMatches,
+          },
+          addTracksChunkStats: {
+            totalChunks: uriChunks.length,
+            totalAttempts: addTracksAttemptsTotal,
+            retriedChunks: addTracksChunksRetried,
+          },
         });
         return;
       }
@@ -1120,6 +1141,27 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
           totalChunks: uriChunks.length,
           addTracksAttemptsTotal,
           addTracksChunksRetried,
+          addedTracks,
+          matched,
+          skipped,
+          duplicateUriMatches,
+          uncertainMatches: uncertainSearchMatches,
+          uncertainTracks: uncertainTracks.slice(0, 20),
+          matchedTracksSample: matchedTracks.slice(0, 20),
+          skippedTracksTotal: skippedTracks.length,
+          skipReasonCounts,
+          skippedTracks: skippedTracks.slice(0, 20),
+          matchSources: {
+            trackSpotifyUrl: reusedExistingSpotifyUrls,
+            recordingSpotifyUrl: reusedRecordingSpotifyUrls,
+            isrc: matchedViaIsrc,
+            search: searchedSpotifyMatches,
+          },
+          addTracksChunkStats: {
+            totalChunks: uriChunks.length,
+            totalAttempts: addTracksAttemptsTotal,
+            retriedChunks: addTracksChunksRetried,
+          },
         });
         return;
       }

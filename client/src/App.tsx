@@ -895,6 +895,7 @@ function PlaylistPage() {
     matched: number;
     skipped: number;
     duplicateUriMatches: number;
+    uncertainMatches: number;
     skippedTracks: Array<{ artist: string; song: string }>;
     matchSources?: {
       trackSpotifyUrl?: number;
@@ -1029,6 +1030,7 @@ function PlaylistPage() {
         matched: typeof data.matched === 'number' ? data.matched : 0,
         skipped: typeof data.skipped === 'number' ? data.skipped : 0,
         duplicateUriMatches: typeof data.duplicateUriMatches === 'number' ? data.duplicateUriMatches : 0,
+        uncertainMatches: typeof data.uncertainMatches === 'number' ? data.uncertainMatches : 0,
         skippedTracks: Array.isArray(data.skippedTracks)
           ? data.skippedTracks
               .filter((item: unknown): item is { artist: string; song: string } => {
@@ -1161,6 +1163,9 @@ function PlaylistPage() {
             </p>
             {spotifyMatchDetails.duplicateUriMatches > 0 && (
               <p>{spotifyMatchDetails.duplicateUriMatches} matched tracks shared duplicate Spotify versions and were collapsed in Spotify export.</p>
+            )}
+            {spotifyMatchDetails.uncertainMatches > 0 && (
+              <p>{spotifyMatchDetails.uncertainMatches} matches had low confidence (score &lt;= 0). Review skipped list and rerun if needed.</p>
             )}
             {spotifyMatchDetails.skippedTracks.length > 0 && (
               <details className="verification-details">

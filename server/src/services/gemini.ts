@@ -3444,7 +3444,7 @@ function parsePlaylistResponse(text: string): Playlist {
 
   const splitCollaboratorNames = (value: string): string[] => {
     return value
-      .split(/\s*(?:,|&|\band\b|\bx\b|\+)\s*/i)
+      .split(/\s*(?:,|&|\band\b|\boch\b|\bx\b|\+)\s*/i)
       .map((item) => canonicalizeDisplayName(item))
       .map((item) => item.replace(/^[-:\s]+/, '').replace(/[.!?,;:]+$/g, '').trim())
       .filter((item) => item.length > 0)
@@ -3462,6 +3462,23 @@ function parsePlaylistResponse(text: string): Playlist {
 
     const markerMatch = normalizedDisplay.match(/^(.*?)\s*(?:,?\s*(?:feat\.?|featuring|ft\.?|duett\s+med|duet\s+with|with)\s+)(.+)$/i);
     if (!markerMatch) {
+      const delimiterParts = splitCollaboratorNames(normalizedDisplay);
+      if (delimiterParts.length >= 2) {
+        const mainArtist = delimiterParts[0];
+        const featuredArtists = delimiterParts.slice(1)
+          .filter((name) => normalize(name) !== normalize(mainArtist));
+        const mainWordCount = mainArtist.split(/\s+/g).filter(Boolean).length;
+        const mainLength = mainArtist.replace(/\s+/g, '').length;
+        const looksLikeSafePrimarySplit = mainWordCount >= 2 && mainLength >= 6;
+        if (looksLikeSafePrimarySplit) {
+          return {
+            mainArtist,
+            featuredArtists: Array.from(new Set(featuredArtists.map((name) => canonicalizeDisplayName(name)))),
+            displayArtist: normalizedDisplay,
+          };
+        }
+      }
+
       return { mainArtist: normalizedDisplay, featuredArtists: [], displayArtist: normalizedDisplay };
     }
 

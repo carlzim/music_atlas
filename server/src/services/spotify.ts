@@ -248,7 +248,7 @@ function splitSpotifyArtistContributors(value: string): { primaryArtist: string;
 
   const splitContributorList = (input: string, primaryArtist: string): string[] => {
     return input
-      .split(/\s*(?:,|&|\band\b|\bx\b|\+)\s*/i)
+      .split(/\s*(?:,|&|\band\b|\boch\b|\bx\b|\+)\s*/i)
       .map((item) => canonicalizeDisplayName(item))
       .map((item) => item.replace(/^[-:\s]+/, '').replace(/[.!?,;:]+$/g, '').trim())
       .filter((item) => item.length > 0)

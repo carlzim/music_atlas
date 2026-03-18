@@ -741,39 +741,53 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     if (recordingIsrc) {
       try {
         const isrcCacheKey = `${recordingIsrc}::${recordingDurationMs || 0}`;
-        let spotifyIsrcCandidates = isrcCandidateCache.get(isrcCacheKey);
-        if (!spotifyIsrcCandidates) {
+        let spotifyIsrcCandidates = isrcCandidateCache.get(isrcCacheKey) || [];
+        if (spotifyIsrcCandidates.length === 0) {
           const fetched = await searchTrackCandidatesByIsrc(recordingIsrc, 6, recordingDurationMs);
           spotifyIsrcCandidates = fetched;
           isrcCandidateCache.set(isrcCacheKey, fetched);
         }
         let isrcCollisionCount = 0;
-        for (const candidate of spotifyIsrcCandidates) {
-          const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
-            ? candidate.spotify_uri.trim()
-            : (typeof candidate.spotify_url === 'string' ? spotifyUrlToUri(candidate.spotify_url) : null);
-          if (!candidateUri) continue;
-          const candidateUrl = typeof candidate.spotify_url === 'string' && candidate.spotify_url.trim().length > 0
-            ? candidate.spotify_url
-            : spotifyUriToUrl(candidateUri);
-          if (!candidateUrl) continue;
-          const uri = candidateUri;
-          if (usedUris.has(uri)) {
-            isrcCollisionCount += 1;
-            continue;
+        const trySelectIsrcCandidate = (candidateList: typeof spotifyIsrcCandidates): boolean => {
+          for (const candidate of candidateList) {
+            const candidateUri = typeof candidate.spotify_uri === 'string' && candidate.spotify_uri.trim().length > 0
+              ? candidate.spotify_uri.trim()
+              : (typeof candidate.spotify_url === 'string' ? spotifyUrlToUri(candidate.spotify_url) : null);
+            if (!candidateUri) continue;
+            const candidateUrl = typeof candidate.spotify_url === 'string' && candidate.spotify_url.trim().length > 0
+              ? candidate.spotify_url
+              : spotifyUriToUrl(candidateUri);
+            if (!candidateUrl) continue;
+            const uri = candidateUri;
+            if (usedUris.has(uri)) {
+              isrcCollisionCount += 1;
+              continue;
+            }
+            uris.push(uri);
+            usedUris.add(uri);
+            matchedViaIsrc += 1;
+            setRecordingSpotifyUrl(track.artist, track.song, candidateUrl);
+            setRecordingSpotifyUri(track.artist, track.song, uri);
+            playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: candidateUrl, spotifyUri: uri });
+            if (typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms) && candidate.duration_ms > 0) {
+              setRecordingDurationMs(track.artist, track.song, candidate.duration_ms);
+            }
+            matchedCurrentTrack = true;
+            matchedTrackCount += 1;
+            return true;
           }
-          uris.push(uri);
-          usedUris.add(uri);
-          matchedViaIsrc += 1;
-          setRecordingSpotifyUrl(track.artist, track.song, candidateUrl);
-          setRecordingSpotifyUri(track.artist, track.song, uri);
-          playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: candidateUrl, spotifyUri: uri });
-          if (typeof candidate.duration_ms === 'number' && Number.isFinite(candidate.duration_ms) && candidate.duration_ms > 0) {
-            setRecordingDurationMs(track.artist, track.song, candidate.duration_ms);
+          return false;
+        };
+
+        trySelectIsrcCandidate(spotifyIsrcCandidates);
+
+        if (!matchedCurrentTrack && spotifyIsrcCandidates.length > 0 && isrcCollisionCount >= spotifyIsrcCandidates.length) {
+          const fetchedExtended = await searchTrackCandidatesByIsrc(recordingIsrc, 20, recordingDurationMs);
+          if (fetchedExtended.length > spotifyIsrcCandidates.length) {
+            spotifyIsrcCandidates = fetchedExtended;
+            isrcCandidateCache.set(isrcCacheKey, fetchedExtended);
           }
-          matchedCurrentTrack = true;
-          matchedTrackCount += 1;
-          break;
+          trySelectIsrcCandidate(spotifyIsrcCandidates);
         }
 
         if (!matchedCurrentTrack && spotifyIsrcCandidates.length > 0 && isrcCollisionCount > 0) {

@@ -1120,6 +1120,42 @@ function PlaylistPage() {
     };
   };
 
+  const formatFailureCategoryLabel = (category?: string): string => {
+    switch (category) {
+      case 'request_timeout':
+        return 'request timeout';
+      case 'network_error':
+        return 'network error';
+      case 'rate_limited':
+        return 'rate limited';
+      case 'spotify_server_error':
+        return 'Spotify server error';
+      case 'spotify_client_error':
+        return 'Spotify client error';
+      case 'unknown_error':
+        return 'unknown error';
+      default:
+        return category ? category.replace(/_/g, ' ') : 'unknown';
+    }
+  };
+
+  const getFailureCategoryHint = (category?: string): string => {
+    switch (category) {
+      case 'rate_limited':
+        return 'Spotify throttled this request; retries usually recover.';
+      case 'request_timeout':
+        return 'Chunk request timed out; network latency may be high.';
+      case 'network_error':
+        return 'Network request failed before Spotify responded.';
+      case 'spotify_server_error':
+        return 'Spotify had a transient server issue (5xx).';
+      case 'spotify_client_error':
+        return 'Spotify rejected this request (4xx) and retries may not help.';
+      default:
+        return '';
+    }
+  };
+
   const handleSaveToSpotify = async () => {
     console.log('Save to Spotify clicked');
     if (!id) {
@@ -1350,27 +1386,33 @@ function PlaylistPage() {
               {' '}search {spotifyMatchDetails.matchSources?.search ?? 0}
             </p>
             {spotifyMatchDetails.addTracksChunkStats && (
-              <p>
-                Spotify add-tracks chunks: {spotifyMatchDetails.addTracksChunkStats.totalChunks ?? 0},
-                {' '}attempts: {spotifyMatchDetails.addTracksChunkStats.totalAttempts ?? 0},
-                {' '}retries: {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0},
-                {' '}retry delay total: {spotifyMatchDetails.addTracksChunkStats.retryDelayTotalMs ?? 0}ms,
-                {' '}retry delay max: {spotifyMatchDetails.addTracksChunkStats.retryDelayMaxMs ?? 0}ms,
-                {' '}retry delay avg: {spotifyMatchDetails.addTracksChunkStats.retryDelayAverageMs ?? 0}ms,
-                {' '}retry-after retries: {spotifyMatchDetails.addTracksChunkStats.retryAfterRetries ?? 0},
-                {' '}backoff retries: {spotifyMatchDetails.addTracksChunkStats.backoffRetries ?? 0},
-                {' '}request timeout: {spotifyMatchDetails.addTracksChunkStats.requestTimeoutMs ?? 0}ms,
-                {' '}max attempts: {spotifyMatchDetails.addTracksChunkStats.maxAttempts ?? 0},
-                {' '}base retry delay: {spotifyMatchDetails.addTracksChunkStats.baseRetryDelayMs ?? 0}ms,
-                {' '}max retry delay: {spotifyMatchDetails.addTracksChunkStats.maxRetryDelayMs ?? 0}ms
-              </p>
+              <>
+                <p>
+                  Retry metrics: chunks {spotifyMatchDetails.addTracksChunkStats.totalChunks ?? 0},
+                  {' '}attempts {spotifyMatchDetails.addTracksChunkStats.totalAttempts ?? 0},
+                  {' '}retries {spotifyMatchDetails.addTracksChunkStats.retriedChunks ?? 0}
+                  {' '}({spotifyMatchDetails.addTracksChunkStats.retryAfterRetries ?? 0} retry-after / {spotifyMatchDetails.addTracksChunkStats.backoffRetries ?? 0} backoff),
+                  {' '}delay total {spotifyMatchDetails.addTracksChunkStats.retryDelayTotalMs ?? 0}ms,
+                  {' '}avg {spotifyMatchDetails.addTracksChunkStats.retryDelayAverageMs ?? 0}ms,
+                  {' '}max {spotifyMatchDetails.addTracksChunkStats.retryDelayMaxMs ?? 0}ms
+                </p>
+                <p>
+                  Retry config: timeout {spotifyMatchDetails.addTracksChunkStats.requestTimeoutMs ?? 0}ms,
+                  {' '}max attempts {spotifyMatchDetails.addTracksChunkStats.maxAttempts ?? 0},
+                  {' '}base delay {spotifyMatchDetails.addTracksChunkStats.baseRetryDelayMs ?? 0}ms,
+                  {' '}max delay {spotifyMatchDetails.addTracksChunkStats.maxRetryDelayMs ?? 0}ms
+                </p>
+              </>
             )}
             {(spotifyMatchDetails.failedChunkCategory || typeof spotifyMatchDetails.failedChunkTransient === 'boolean') && (
               <p>
-                Failed chunk category: {(spotifyMatchDetails.failedChunkCategory || 'unknown').replace(/_/g, ' ')},
+                Failed chunk category: {formatFailureCategoryLabel(spotifyMatchDetails.failedChunkCategory)},
                 {' '}transient: {typeof spotifyMatchDetails.failedChunkTransient === 'boolean'
                   ? (spotifyMatchDetails.failedChunkTransient ? 'yes' : 'no')
                   : 'unknown'}
+                {getFailureCategoryHint(spotifyMatchDetails.failedChunkCategory)
+                  ? ` — ${getFailureCategoryHint(spotifyMatchDetails.failedChunkCategory)}`
+                  : ''}
               </p>
             )}
             {(spotifyMatchDetails.failedChunkIndex || spotifyMatchDetails.failedChunkStatus || spotifyMatchDetails.failedChunkError) && (

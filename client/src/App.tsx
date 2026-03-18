@@ -912,6 +912,8 @@ function PlaylistPage() {
       tracksWithArtistDisplay?: number;
       featuredArtistFallbackAttempts?: number;
       featuredArtistFallbackMatches?: number;
+      featuredArtistDiagnosticFallbackAttempts?: number;
+      featuredArtistDiagnosticFallbackMatches?: number;
       displayArtistFallbackAttempts?: number;
       displayArtistFallbackMatches?: number;
       searchExactArtistMatches?: number;
@@ -1121,6 +1123,8 @@ function PlaylistPage() {
             tracksWithArtistDisplay?: number;
             featuredArtistFallbackAttempts?: number;
             featuredArtistFallbackMatches?: number;
+            featuredArtistDiagnosticFallbackAttempts?: number;
+            featuredArtistDiagnosticFallbackMatches?: number;
             displayArtistFallbackAttempts?: number;
             displayArtistFallbackMatches?: number;
             searchExactArtistMatches?: number;
@@ -1456,6 +1460,8 @@ function PlaylistPage() {
                 {' '}display aliases {spotifyMatchDetails.artistNormalizationStats.tracksWithArtistDisplay ?? 0},
                 {' '}featured fallback attempts {spotifyMatchDetails.artistNormalizationStats.featuredArtistFallbackAttempts ?? 0},
                 {' '}featured fallback matches {spotifyMatchDetails.artistNormalizationStats.featuredArtistFallbackMatches ?? 0},
+                {' '}featured diagnostic attempts {spotifyMatchDetails.artistNormalizationStats.featuredArtistDiagnosticFallbackAttempts ?? 0},
+                {' '}featured diagnostic matches {spotifyMatchDetails.artistNormalizationStats.featuredArtistDiagnosticFallbackMatches ?? 0},
                 {' '}display fallback attempts {spotifyMatchDetails.artistNormalizationStats.displayArtistFallbackAttempts ?? 0},
                 {' '}display fallback matches {spotifyMatchDetails.artistNormalizationStats.displayArtistFallbackMatches ?? 0},
                 {' '}search exact {spotifyMatchDetails.artistNormalizationStats.searchExactArtistMatches ?? 0},

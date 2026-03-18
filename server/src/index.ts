@@ -653,6 +653,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   const uris: string[] = [];
   const usedUris = new Set<string>();
   const playlistTrackSpotifyUpdates: Array<{ artist: string; song: string; spotifyUrl?: string; spotifyUri?: string }> = [];
+  const metadataLookupCache = new Map<string, { isrc: string | null; durationMs: number | null }>();
   let matchedTrackCount = 0;
   const skippedTracks: Array<{ artist: string; song: string; reason: string }> = [];
   let reusedExistingSpotifyUrls = 0;
@@ -707,8 +708,20 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
     let recordingIsrc = getRecordingIsrc(track.artist, track.song);
     let recordingDurationMs = getRecordingDurationMs(track.artist, track.song);
     if (!recordingIsrc || !recordingDurationMs) {
+      const metadataCacheKey = `${track.artist.trim().toLowerCase()}::${track.song.trim().toLowerCase()}`;
       try {
-        const metadata = await resolveMusicBrainzRecordingMetadata(track.artist, track.song);
+        let metadata = metadataLookupCache.get(metadataCacheKey);
+        if (!metadata) {
+          const fetched = await resolveMusicBrainzRecordingMetadata(track.artist, track.song);
+          metadata = {
+            isrc: fetched.isrc || null,
+            durationMs: typeof fetched.durationMs === 'number' && Number.isFinite(fetched.durationMs)
+              ? Math.max(0, Math.floor(fetched.durationMs))
+              : null,
+          };
+          metadataLookupCache.set(metadataCacheKey, metadata);
+        }
+
         if (metadata.isrc && !recordingIsrc) {
           recordingIsrc = metadata.isrc;
           setRecordingIsrc(track.artist, track.song, metadata.isrc);
@@ -716,9 +729,10 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         }
         if (typeof metadata.durationMs === 'number' && Number.isFinite(metadata.durationMs) && metadata.durationMs > 0 && !recordingDurationMs) {
           recordingDurationMs = Math.max(0, Math.floor(metadata.durationMs));
-          setRecordingDurationMs(track.artist, track.song, recordingDurationMs);
+            setRecordingDurationMs(track.artist, track.song, recordingDurationMs);
         }
       } catch (error) {
+        metadataLookupCache.set(metadataCacheKey, { isrc: null, durationMs: null });
         console.log('[spotify-save] mb isrc lookup skipped:', { artist: track.artist, song: track.song, error: error instanceof Error ? error.message : String(error) });
       }
     }

@@ -898,6 +898,7 @@ function PlaylistPage() {
     duplicateUriMatches: number;
     uncertainMatches: number;
     uncertainTracks: Array<{ artist: string; song: string; score: number }>;
+    matchedTracksSample: Array<{ artist: string; song: string; source: string; score?: number | null }>;
     skipReasonCounts: Record<string, number>;
     skippedTracks: Array<{ artist: string; song: string; reason?: string }>;
     matchSources?: {
@@ -1072,6 +1073,19 @@ function PlaylistPage() {
               })
               .slice(0, 20)
           : [],
+        matchedTracksSample: Array.isArray(data.matchedTracksSample)
+          ? data.matchedTracksSample
+              .filter((item: unknown): item is { artist: string; song: string; source: string; score?: number | null } => {
+                return Boolean(
+                  item
+                    && typeof item === 'object'
+                    && typeof (item as { artist?: unknown }).artist === 'string'
+                    && typeof (item as { song?: unknown }).song === 'string'
+                    && typeof (item as { source?: unknown }).source === 'string'
+                );
+              })
+              .slice(0, 20)
+          : [],
         skipReasonCounts: data.skipReasonCounts && typeof data.skipReasonCounts === 'object'
           ? Object.entries(data.skipReasonCounts as Record<string, unknown>).reduce<Record<string, number>>((acc, [key, value]) => {
               if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
@@ -1217,6 +1231,19 @@ function PlaylistPage() {
               {' '}ISRC {spotifyMatchDetails.matchSources?.isrc ?? 0},
               {' '}search {spotifyMatchDetails.matchSources?.search ?? 0}
             </p>
+            {spotifyMatchDetails.matchedTracksSample.length > 0 && (
+              <details className="verification-details">
+                <summary>Matched tracks sample ({spotifyMatchDetails.matchedTracksSample.length})</summary>
+                <ul className="playlist-list">
+                  {spotifyMatchDetails.matchedTracksSample.map((track, idx) => (
+                    <li key={`${track.artist}-${track.song}-matched-${idx}`} className="playlist-item">
+                      {track.song} - {track.artist} ({track.source.replace(/_/g, ' ')}
+                      {typeof track.score === 'number' && Number.isFinite(track.score) ? `, score ${track.score}` : ''})
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
             {spotifyMatchDetails.duplicateUriMatches > 0 && (
               <p>{spotifyMatchDetails.duplicateUriMatches} matched tracks shared duplicate Spotify versions and were collapsed in Spotify export.</p>
             )}

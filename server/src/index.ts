@@ -653,6 +653,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
   const uris: string[] = [];
   const usedUris = new Set<string>();
   const playlistTrackSpotifyUpdates: Array<{ artist: string; song: string; spotifyUrl?: string; spotifyUri?: string }> = [];
+  const matchedTracks: Array<{ artist: string; song: string; source: 'track_link' | 'recording_cache' | 'isrc' | 'search'; score?: number | null }> = [];
   const metadataLookupCache = new Map<string, { isrc: string | null; durationMs: number | null }>();
   const isrcCandidateCache = new Map<string, Array<{ spotify_url: string | null; spotify_uri?: string | null; duration_ms?: number | null }>>();
   let matchedTrackCount = 0;
@@ -679,6 +680,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       uris.push(existingUri);
       usedUris.add(existingUri);
       reusedExistingSpotifyUrls += 1;
+      matchedTracks.push({ artist: track.artist, song: track.song, source: 'track_link', score: null });
       const normalizedExistingUrl = existingSpotifyUrl || (existingUri ? spotifyUriToUrl(existingUri) : null);
       if (normalizedExistingUrl) {
         playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: normalizedExistingUrl, spotifyUri: existingUri });
@@ -698,6 +700,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       uris.push(storedUri);
       usedUris.add(storedUri);
       reusedRecordingSpotifyUrls += 1;
+      matchedTracks.push({ artist: track.artist, song: track.song, source: 'recording_cache', score: null });
       const cachedUrl = storedSpotifyUrl || spotifyUriToUrl(storedUri);
       if (cachedUrl) {
         playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: cachedUrl, spotifyUri: storedUri });
@@ -767,6 +770,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
             uris.push(uri);
             usedUris.add(uri);
             matchedViaIsrc += 1;
+            matchedTracks.push({ artist: track.artist, song: track.song, source: 'isrc', score: null });
             setRecordingSpotifyUrl(track.artist, track.song, candidateUrl);
             setRecordingSpotifyUri(track.artist, track.song, uri);
             playlistTrackSpotifyUpdates.push({ artist: track.artist, song: track.song, spotifyUrl: candidateUrl, spotifyUri: uri });
@@ -899,6 +903,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
         uris.push(selectedUri);
         usedUris.add(selectedUri);
         searchedSpotifyMatches += 1;
+        matchedTracks.push({ artist: track.artist, song: track.song, source: 'search', score: selectedScore });
         if (typeof selectedScore === 'number' && selectedScore <= 0) {
           uncertainSearchMatches += 1;
           uncertainTracks.push({
@@ -961,6 +966,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       skippedTracksTotal: skippedTracks.length,
       uncertainMatches: uncertainSearchMatches,
       uncertainTracks: uncertainTracks.slice(0, 20),
+      matchedTracksSample: matchedTracks.slice(0, 20),
       skipReasonCounts,
       skippedTracks: skippedTracks.slice(0, 20),
       matchSources: {
@@ -1119,6 +1125,7 @@ app.post('/api/spotify/save-playlist/:id', async (req, res) => {
       duplicateUriMatches,
       uncertainMatches: uncertainSearchMatches,
       uncertainTracks: uncertainTracks.slice(0, 20),
+      matchedTracksSample: matchedTracks.slice(0, 20),
       skippedTracksTotal: skippedTracks.length,
       skipReasonCounts,
       skippedTracks: skippedTracks.slice(0, 20),

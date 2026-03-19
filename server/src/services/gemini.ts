@@ -118,6 +118,10 @@ interface TruthDetails {
       target_met_coverage: number;
       target_miss_count: number;
       target_miss_reasons: string[];
+      target_size_met: boolean;
+      target_retention_met: boolean;
+      target_artist_met: boolean;
+      target_decade_met: boolean;
       unique_artists: number;
       unique_artist_target: number;
       unique_artist_target_met: boolean;
@@ -3811,6 +3815,10 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         target_met_coverage: targetMetCoverage,
         target_miss_count: targetMissReasons.length,
         target_miss_reasons: targetMissReasons,
+        target_size_met: selectedTrackGap === 0,
+        target_retention_met: selectionRetentionGap === 0,
+        target_artist_met: uniqueArtistTargetGap === 0,
+        target_decade_met: uniqueDecadeTargetGap === 0,
         unique_artists: uniqueArtists,
         unique_artist_target: uniqueArtistTarget,
         unique_artist_target_met: uniqueArtistTargetGap === 0,

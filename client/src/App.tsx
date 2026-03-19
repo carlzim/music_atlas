@@ -129,6 +129,10 @@ interface TruthSummary {
       target_met_coverage?: number;
       target_miss_count?: number;
       target_miss_reasons?: string[];
+      target_size_met?: boolean;
+      target_retention_met?: boolean;
+      target_artist_met?: boolean;
+      target_decade_met?: boolean;
       unique_artists?: number;
       unique_artist_target?: number;
       unique_artist_target_met?: boolean;
@@ -838,6 +842,9 @@ function HomePage() {
               : ''}
             {truthSummary.curation?.composition
               ? `, targets met ${truthSummary.curation.composition.target_met_count ?? 'n/a'}/${truthSummary.curation.composition.target_total_count ?? 'n/a'} (${typeof truthSummary.curation.composition.target_met_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.target_met_coverage * 100)}%` : 'n/a'}), miss reasons ${truthSummary.curation.composition.target_miss_count ?? 0}: ${Array.isArray(truthSummary.curation.composition.target_miss_reasons) && truthSummary.curation.composition.target_miss_reasons.length > 0 ? truthSummary.curation.composition.target_miss_reasons.join('/') : 'none'}`
+              : ''}
+            {truthSummary.curation?.composition
+              ? `, target status size ${truthSummary.curation.composition.target_size_met === true ? 'ok' : truthSummary.curation.composition.target_size_met === false ? 'miss' : 'n/a'} retention ${truthSummary.curation.composition.target_retention_met === true ? 'ok' : truthSummary.curation.composition.target_retention_met === false ? 'miss' : 'n/a'} artist ${truthSummary.curation.composition.target_artist_met === true ? 'ok' : truthSummary.curation.composition.target_artist_met === false ? 'miss' : 'n/a'} decade ${truthSummary.curation.composition.target_decade_met === true ? 'ok' : truthSummary.curation.composition.target_decade_met === false ? 'miss' : 'n/a'}`
               : ''}
             {truthSummary.curation?.ranking_floor
               ? `, ranking floor ${truthSummary.curation.ranking_floor.applied ? 'on' : 'off'}${truthSummary.curation.ranking_floor.applied ? ` (dropped ${truthSummary.curation.ranking_floor.dropped_tracks ?? 0})` : ''}`

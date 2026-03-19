@@ -113,6 +113,7 @@ interface TruthDetails {
       selected_track_coverage: number;
       selection_retention_gap: number;
       selection_retention_coverage: number;
+      target_met_count: number;
       target_miss_count: number;
       target_miss_reasons: string[];
       unique_artists: number;
@@ -3799,6 +3800,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         selected_track_coverage: selectedTrackCoverage,
         selection_retention_gap: selectionRetentionGap,
         selection_retention_coverage: selectionRetentionCoverage,
+        target_met_count: 4 - targetMissReasons.length,
         target_miss_count: targetMissReasons.length,
         target_miss_reasons: targetMissReasons,
         unique_artists: uniqueArtists,

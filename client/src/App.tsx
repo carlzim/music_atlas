@@ -121,9 +121,11 @@ interface TruthSummary {
       unique_artists?: number;
       unique_artist_target?: number;
       unique_artist_target_met?: boolean;
+      unique_artist_target_gap?: number;
       unique_decades?: number;
       unique_decade_target?: number;
       unique_decade_target_met?: boolean;
+      unique_decade_target_gap?: number;
       max_tracks_per_artist?: number;
     };
   };
@@ -810,7 +812,7 @@ function HomePage() {
               ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}/${truthSummary.curation.composition.unique_decade_target ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
-              ? `, targets artist ${truthSummary.curation.composition.unique_artist_target_met === true ? 'met' : truthSummary.curation.composition.unique_artist_target_met === false ? 'miss' : 'n/a'} decade ${truthSummary.curation.composition.unique_decade_target_met === true ? 'met' : truthSummary.curation.composition.unique_decade_target_met === false ? 'miss' : 'n/a'}`
+              ? `, targets artist ${truthSummary.curation.composition.unique_artist_target_met === true ? 'met' : truthSummary.curation.composition.unique_artist_target_met === false ? `miss (gap ${truthSummary.curation.composition.unique_artist_target_gap ?? 'n/a'})` : 'n/a'} decade ${truthSummary.curation.composition.unique_decade_target_met === true ? 'met' : truthSummary.curation.composition.unique_decade_target_met === false ? `miss (gap ${truthSummary.curation.composition.unique_decade_target_gap ?? 'n/a'})` : 'n/a'}`
               : ''}
             {truthSummary.curation?.ranking_floor
               ? `, ranking floor ${truthSummary.curation.ranking_floor.applied ? 'on' : 'off'}${truthSummary.curation.ranking_floor.applied ? ` (dropped ${truthSummary.curation.ranking_floor.dropped_tracks ?? 0})` : ''}`

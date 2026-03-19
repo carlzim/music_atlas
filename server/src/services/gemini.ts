@@ -93,6 +93,11 @@ interface TruthDetails {
       entity_signature_score: number;
       diversity_adjustment: number;
     }>;
+    ranking_floor?: {
+      applied: boolean;
+      dropped_tracks: number;
+      floor_score: number;
+    };
     composition?: {
       selected_tracks: number;
       unique_artists: number;
@@ -1881,15 +1886,20 @@ function rankVerifiedCreditTracksByProminence(
     entity_signature_score: number;
     diversity_adjustment: number;
   }>;
+  rankingFloor: {
+    applied: boolean;
+    droppedTracks: number;
+    floorScore: number;
+  };
 } {
   if (!constraint || constraint.kind !== 'credit' || tracks.length <= 1) {
-    return { tracks, topScoreSample: [] };
+    return { tracks, topScoreSample: [], rankingFloor: { applied: false, droppedTracks: 0, floorScore: 0 } };
   }
 
   const creditName = (constraint.value || '').trim();
   const creditRole = (constraint.creditRole || '').trim();
   if (!creditName || !creditRole) {
-    return { tracks, topScoreSample: [] };
+    return { tracks, topScoreSample: [], rankingFloor: { applied: false, droppedTracks: 0, floorScore: 0 } };
   }
 
   const truthCandidates = getTruthCreditCandidates(creditName, creditRole, 500);
@@ -2071,9 +2081,29 @@ function rankVerifiedCreditTracksByProminence(
       return a.index - b.index;
     });
 
+  let filteredScored = scored;
+  let rankingFloorApplied = false;
+  let rankingFloorScore = 0;
+  let rankingDroppedTracks = 0;
+
+  if (mode !== 'deep_cuts' && scored.length > 12) {
+    const topScore = scored[0]?.components.final_score ?? 0;
+    if (Number.isFinite(topScore) && topScore > 0) {
+      const ratio = mode === 'essential' ? 0.52 : 0.42;
+      rankingFloorScore = topScore * ratio;
+      const tentative = scored.filter((entry) => entry.components.final_score >= rankingFloorScore);
+      const minimumPreserved = Math.min(12, scored.length);
+      if (tentative.length >= minimumPreserved) {
+        filteredScored = tentative;
+        rankingFloorApplied = true;
+        rankingDroppedTracks = scored.length - tentative.length;
+      }
+    }
+  }
+
   return {
-    tracks: scored.map((entry) => entry.track),
-    topScoreSample: scored.slice(0, 10).map((entry) => ({
+    tracks: filteredScored.map((entry) => entry.track),
+    topScoreSample: filteredScored.slice(0, 10).map((entry) => ({
       artist: entry.track.artist,
       song: entry.track.song,
       final_score: Number(entry.components.final_score.toFixed(3)),
@@ -2083,6 +2113,11 @@ function rankVerifiedCreditTracksByProminence(
       entity_signature_score: Number(entry.components.entity_signature_score.toFixed(3)),
       diversity_adjustment: Number(entry.components.diversity_adjustment.toFixed(3)),
     })),
+    rankingFloor: {
+      applied: rankingFloorApplied,
+      droppedTracks: rankingDroppedTracks,
+      floorScore: Number(rankingFloorScore.toFixed(3)),
+    },
   };
 }
 
@@ -3588,6 +3623,11 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       mode: curationMode.mode,
       inferred_from_prompt: curationMode.inferredFromPrompt,
       top_score_sample: prominenceRanking.topScoreSample,
+      ranking_floor: {
+        applied: prominenceRanking.rankingFloor.applied,
+        dropped_tracks: prominenceRanking.rankingFloor.droppedTracks,
+        floor_score: prominenceRanking.rankingFloor.floorScore,
+      },
       composition: {
         selected_tracks: composedCreditTracks.length,
         unique_artists: countUniqueTrackArtists(composedCreditTracks),

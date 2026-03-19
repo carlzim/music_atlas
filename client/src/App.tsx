@@ -109,6 +109,11 @@ interface TruthSummary {
       dropped_tracks?: number;
       floor_score?: number;
     };
+    ranking_window?: {
+      applied?: boolean;
+      input_tracks?: number;
+      kept_tracks?: number;
+    };
     composition?: {
       selected_tracks?: number;
       unique_artists?: number;
@@ -801,6 +806,9 @@ function HomePage() {
               : ''}
             {truthSummary.curation?.ranking_floor
               ? `, ranking floor ${truthSummary.curation.ranking_floor.applied ? 'on' : 'off'}${truthSummary.curation.ranking_floor.applied ? ` (dropped ${truthSummary.curation.ranking_floor.dropped_tracks ?? 0})` : ''}`
+              : ''}
+            {truthSummary.curation?.ranking_window
+              ? `, ranking window ${truthSummary.curation.ranking_window.applied ? `${truthSummary.curation.ranking_window.kept_tracks ?? 'n/a'}/${truthSummary.curation.ranking_window.input_tracks ?? 'n/a'}` : 'full'}`
               : ''}
           </p>
         )}

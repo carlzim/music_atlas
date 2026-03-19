@@ -98,6 +98,11 @@ interface TruthDetails {
       dropped_tracks: number;
       floor_score: number;
     };
+    ranking_window?: {
+      applied: boolean;
+      input_tracks: number;
+      kept_tracks: number;
+    };
     composition?: {
       selected_tracks: number;
       unique_artists: number;
@@ -2382,6 +2387,12 @@ function getModeUniqueArtistTarget(mode: PlaylistCurationMode, desiredCount: num
   return Math.min(desiredCount, Math.max(3, Math.floor(desiredCount * ratio)));
 }
 
+function getModeRankingWindowSize(mode: PlaylistCurationMode): number {
+  if (mode === 'essential') return 16;
+  if (mode === 'balanced') return 22;
+  return MAX_PLAYLIST_TRACKS;
+}
+
 function getMaxTracksPerArtist(tracks: Track[]): number {
   const counts = new Map<string, number>();
   let max = 0;
@@ -3631,10 +3642,15 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       curationMode.mode
     );
 
+    const rankingWindowSize = getModeRankingWindowSize(curationMode.mode);
+    const rankingWindowInputCount = prominenceRanking.tracks.length;
+    const rankingWindowTracks = prominenceRanking.tracks.slice(0, rankingWindowSize);
+    const rankingWindowApplied = rankingWindowTracks.length < rankingWindowInputCount;
+
     let composedCreditTracks = await rerankVerifiedCreditTracksWithGemini(
       translatedPrompt,
       constraint,
-      prominenceRanking.tracks
+      rankingWindowTracks
     );
     composedCreditTracks = applyCreditOnlyArtistDiversity(translatedPrompt, composedCreditTracks);
     composedCreditTracks = composeCreditTracksByMode(composedCreditTracks, curationMode.mode, MAX_PLAYLIST_TRACKS);
@@ -3655,6 +3671,11 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         applied: prominenceRanking.rankingFloor.applied,
         dropped_tracks: prominenceRanking.rankingFloor.droppedTracks,
         floor_score: prominenceRanking.rankingFloor.floorScore,
+      },
+      ranking_window: {
+        applied: rankingWindowApplied,
+        input_tracks: rankingWindowInputCount,
+        kept_tracks: rankingWindowTracks.length,
       },
       composition: {
         selected_tracks: composedCreditTracks.length,

@@ -118,6 +118,9 @@ interface TruthSummary {
     };
     composition?: {
       selected_tracks?: number;
+      selected_track_target?: number;
+      selected_track_gap?: number;
+      selected_track_coverage?: number;
       unique_artists?: number;
       unique_artist_target?: number;
       unique_artist_target_met?: boolean;
@@ -814,10 +817,13 @@ function HomePage() {
               ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}/${truthSummary.curation.composition.unique_decade_target ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
+              ? `, size ${truthSummary.curation.composition.selected_tracks ?? 'n/a'}/${truthSummary.curation.composition.selected_track_target ?? 'n/a'}${truthSummary.curation.composition.selected_track_gap ? ` (gap ${truthSummary.curation.composition.selected_track_gap})` : ''}`
+              : ''}
+            {truthSummary.curation?.composition
               ? `, targets artist ${truthSummary.curation.composition.unique_artist_target_met === true ? 'met' : truthSummary.curation.composition.unique_artist_target_met === false ? `miss (gap ${truthSummary.curation.composition.unique_artist_target_gap ?? 'n/a'})` : 'n/a'} decade ${truthSummary.curation.composition.unique_decade_target_met === true ? 'met' : truthSummary.curation.composition.unique_decade_target_met === false ? `miss (gap ${truthSummary.curation.composition.unique_decade_target_gap ?? 'n/a'})` : 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
-              ? `, coverage artist ${typeof truthSummary.curation.composition.unique_artist_target_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.unique_artist_target_coverage * 100)}%` : 'n/a'} decade ${typeof truthSummary.curation.composition.unique_decade_target_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.unique_decade_target_coverage * 100)}%` : 'n/a'}`
+              ? `, coverage size ${typeof truthSummary.curation.composition.selected_track_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.selected_track_coverage * 100)}%` : 'n/a'} artist ${typeof truthSummary.curation.composition.unique_artist_target_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.unique_artist_target_coverage * 100)}%` : 'n/a'} decade ${typeof truthSummary.curation.composition.unique_decade_target_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.unique_decade_target_coverage * 100)}%` : 'n/a'}`
               : ''}
             {truthSummary.curation?.ranking_floor
               ? `, ranking floor ${truthSummary.curation.ranking_floor.applied ? 'on' : 'off'}${truthSummary.curation.ranking_floor.applied ? ` (dropped ${truthSummary.curation.ranking_floor.dropped_tracks ?? 0})` : ''}`

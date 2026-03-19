@@ -96,6 +96,7 @@ interface TruthDetails {
     composition?: {
       selected_tracks: number;
       unique_artists: number;
+      unique_artist_target: number;
       unique_decades: number;
     };
   };
@@ -2316,6 +2317,16 @@ function getTrackDecade(track: Track): number | null {
   return Math.floor(year / 10) * 10;
 }
 
+function getModeUniqueArtistTarget(mode: PlaylistCurationMode, desiredCount: number): number {
+  const ratioByMode: Record<PlaylistCurationMode, number> = {
+    essential: 0.5,
+    balanced: 0.65,
+    deep_cuts: 0.75,
+  };
+  const ratio = ratioByMode[mode] || ratioByMode.balanced;
+  return Math.min(desiredCount, Math.max(3, Math.floor(desiredCount * ratio)));
+}
+
 function composeCreditTracksByMode(
   tracks: Track[],
   mode: PlaylistCurationMode,
@@ -2335,6 +2346,7 @@ function composeCreditTracksByMode(
     deep_cuts: { artistCapPrimary: 2, decadeCapPrimary: 3 },
   };
   const caps = modeCaps[mode] || modeCaps.balanced;
+  const uniqueArtistTarget = getModeUniqueArtistTarget(mode, desiredCount);
 
   const trackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
   const canUseTrack = (track: Track, artistCap: number, decadeCap: number): boolean => {
@@ -2380,6 +2392,17 @@ function composeCreditTracksByMode(
       addTrack(track);
     }
   };
+
+  if (uniqueArtistTarget > 1) {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      if (artistCounts.size >= uniqueArtistTarget) break;
+      const artistKey = normalize(track.artist);
+      if (!artistKey || artistCounts.has(artistKey)) continue;
+      if (!canUseTrack(track, 1, caps.decadeCapPrimary + 1)) continue;
+      addTrack(track);
+    }
+  }
 
   addPass(caps.artistCapPrimary, caps.decadeCapPrimary);
   if (selected.length < desiredCount) addPass(caps.artistCapPrimary + 1, caps.decadeCapPrimary + 2);
@@ -3549,6 +3572,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       composition: {
         selected_tracks: composedCreditTracks.length,
         unique_artists: countUniqueTrackArtists(composedCreditTracks),
+        unique_artist_target: getModeUniqueArtistTarget(curationMode.mode, composedCreditTracks.length),
         unique_decades: uniqueDecades.size,
       },
     };

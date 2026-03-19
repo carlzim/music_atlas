@@ -3226,7 +3226,7 @@ export function getTracksByRecordingCreditEvidence(
   creditName: string,
   creditRole: string,
   limit = 24
-): Array<{ artist: string; title: string }> {
+): Array<{ artist: string; title: string; evidence_count: number }> {
   const normalizedCreditName = buildCreditCanonicalKey(creditName);
   const normalizedCreditRole = creditRole.trim().toLowerCase();
   if (!normalizedCreditName || !normalizedCreditRole) return [];
@@ -3253,6 +3253,9 @@ export function getTracksByRecordingCreditEvidence(
       .map((row) => ({
         artist: typeof row.artist === 'string' ? row.artist.trim() : '',
         title: typeof row.title === 'string' ? row.title.trim() : '',
+        evidence_count: typeof row.evidence_count === 'number' && Number.isFinite(row.evidence_count)
+          ? Math.max(1, Math.floor(row.evidence_count))
+          : 1,
       }))
       .filter((row) => row.artist.length > 0 && row.title.length > 0);
   } catch {

@@ -93,6 +93,11 @@ interface TruthDetails {
       entity_signature_score: number;
       diversity_adjustment: number;
     }>;
+    composition?: {
+      selected_tracks: number;
+      unique_artists: number;
+      unique_decades: number;
+    };
   };
 }
 
@@ -2303,6 +2308,93 @@ function applyCreditOnlyArtistDiversity(prompt: string, tracks: Track[]): Track[
   return chosen.length > 0 ? chosen : tracks;
 }
 
+function getTrackDecade(track: Track): number | null {
+  const year = typeof track.release_year === 'number' && Number.isFinite(track.release_year)
+    ? Math.floor(track.release_year)
+    : null;
+  if (!year || year < 1900 || year > 2100) return null;
+  return Math.floor(year / 10) * 10;
+}
+
+function composeCreditTracksByMode(
+  tracks: Track[],
+  mode: PlaylistCurationMode,
+  maxTracks: number
+): Track[] {
+  if (tracks.length <= 1) return tracks;
+
+  const desiredCount = Math.min(maxTracks, tracks.length);
+  const selected: Track[] = [];
+  const selectedKeys = new Set<string>();
+  const artistCounts = new Map<string, number>();
+  const decadeCounts = new Map<number, number>();
+
+  const modeCaps: Record<PlaylistCurationMode, { artistCapPrimary: number; decadeCapPrimary: number }> = {
+    essential: { artistCapPrimary: 3, decadeCapPrimary: 6 },
+    balanced: { artistCapPrimary: 2, decadeCapPrimary: 4 },
+    deep_cuts: { artistCapPrimary: 2, decadeCapPrimary: 3 },
+  };
+  const caps = modeCaps[mode] || modeCaps.balanced;
+
+  const trackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
+  const canUseTrack = (track: Track, artistCap: number, decadeCap: number): boolean => {
+    const key = trackKey(track);
+    if (!key || selectedKeys.has(key)) return false;
+
+    const artistKey = normalize(track.artist);
+    if (!artistKey) return false;
+    const artistCount = artistCounts.get(artistKey) || 0;
+    if (artistCount >= artistCap) return false;
+
+    const decade = getTrackDecade(track);
+    if (decade !== null) {
+      const decadeCount = decadeCounts.get(decade) || 0;
+      if (decadeCount >= decadeCap) return false;
+    }
+
+    return true;
+  };
+
+  const addTrack = (track: Track): void => {
+    const key = trackKey(track);
+    if (!key || selectedKeys.has(key)) return;
+
+    selected.push(track);
+    selectedKeys.add(key);
+
+    const artistKey = normalize(track.artist);
+    if (artistKey) {
+      artistCounts.set(artistKey, (artistCounts.get(artistKey) || 0) + 1);
+    }
+
+    const decade = getTrackDecade(track);
+    if (decade !== null) {
+      decadeCounts.set(decade, (decadeCounts.get(decade) || 0) + 1);
+    }
+  };
+
+  const addPass = (artistCap: number, decadeCap: number): void => {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      if (!canUseTrack(track, artistCap, decadeCap)) continue;
+      addTrack(track);
+    }
+  };
+
+  addPass(caps.artistCapPrimary, caps.decadeCapPrimary);
+  if (selected.length < desiredCount) addPass(caps.artistCapPrimary + 1, caps.decadeCapPrimary + 2);
+  if (selected.length < desiredCount) addPass(caps.artistCapPrimary + 2, caps.decadeCapPrimary + 4);
+
+  if (selected.length < desiredCount) {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      addTrack(track);
+    }
+  }
+
+  return selected.length > 0 ? selected.slice(0, desiredCount) : tracks.slice(0, desiredCount);
+}
+
 function applyGeneralArtistDiversity(tracks: Track[]): Track[] {
   if (tracks.length <= 1) return tracks;
 
@@ -3424,23 +3516,42 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   }
 
   if (constraint?.kind === 'credit' && verifiedTracks.length > 0) {
-    verifiedTracks = preferCanonicalCreditTrackVersions(verifiedTracks, translatedPrompt, MIN_VERIFIED_TRACKS);
+    const retrievedVerifiedTracks = preferCanonicalCreditTrackVersions(verifiedTracks, translatedPrompt, MIN_VERIFIED_TRACKS);
+
     const prominenceRanking = rankVerifiedCreditTracksByProminence(
-      verifiedTracks,
+      retrievedVerifiedTracks,
       constraint,
       creditPreferredArtistsForCuration,
       creditPreferredWorksForCuration,
       curationMode.mode
     );
-    verifiedTracks = prominenceRanking.tracks;
+
+    let composedCreditTracks = await rerankVerifiedCreditTracksWithGemini(
+      translatedPrompt,
+      constraint,
+      prominenceRanking.tracks
+    );
+    composedCreditTracks = applyCreditOnlyArtistDiversity(translatedPrompt, composedCreditTracks);
+    composedCreditTracks = composeCreditTracksByMode(composedCreditTracks, curationMode.mode, MAX_PLAYLIST_TRACKS);
+    composedCreditTracks = refineCreditTrackReasons(composedCreditTracks, constraint);
+    verifiedTracks = composedCreditTracks;
+
+    const uniqueDecades = new Set<number>();
+    for (const track of composedCreditTracks) {
+      const decade = getTrackDecade(track);
+      if (decade !== null) uniqueDecades.add(decade);
+    }
+
     truth.curation = {
       mode: curationMode.mode,
       inferred_from_prompt: curationMode.inferredFromPrompt,
       top_score_sample: prominenceRanking.topScoreSample,
+      composition: {
+        selected_tracks: composedCreditTracks.length,
+        unique_artists: countUniqueTrackArtists(composedCreditTracks),
+        unique_decades: uniqueDecades.size,
+      },
     };
-    verifiedTracks = await rerankVerifiedCreditTracksWithGemini(translatedPrompt, constraint, verifiedTracks);
-    verifiedTracks = applyCreditOnlyArtistDiversity(translatedPrompt, verifiedTracks);
-    verifiedTracks = refineCreditTrackReasons(verifiedTracks, constraint);
   }
 
   if (verification && constraint?.kind === 'credit') {

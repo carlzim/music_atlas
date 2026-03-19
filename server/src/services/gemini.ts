@@ -113,6 +113,7 @@ interface TruthDetails {
       selected_track_coverage: number;
       selection_retention_gap: number;
       selection_retention_coverage: number;
+      target_miss_reasons: string[];
       unique_artists: number;
       unique_artist_target: number;
       unique_artist_target_met: boolean;
@@ -3767,6 +3768,11 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const uniqueDecadeTargetCoverage = uniqueDecadeTarget > 0
       ? Math.min(1, uniqueDecades.size / uniqueDecadeTarget)
       : 1;
+    const targetMissReasons: string[] = [];
+    if (selectedTrackGap > 0) targetMissReasons.push('size');
+    if (selectionRetentionGap > 0) targetMissReasons.push('retention');
+    if (uniqueArtistTargetGap > 0) targetMissReasons.push('artist');
+    if (uniqueDecadeTargetGap > 0) targetMissReasons.push('decade');
 
     truth.curation = {
       mode: curationMode.mode,
@@ -3792,6 +3798,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         selected_track_coverage: selectedTrackCoverage,
         selection_retention_gap: selectionRetentionGap,
         selection_retention_coverage: selectionRetentionCoverage,
+        target_miss_reasons: targetMissReasons,
         unique_artists: uniqueArtists,
         unique_artist_target: uniqueArtistTarget,
         unique_artist_target_met: uniqueArtistTargetGap === 0,

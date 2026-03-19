@@ -124,6 +124,7 @@ interface TruthSummary {
       selected_track_coverage?: number;
       selection_retention_gap?: number;
       selection_retention_coverage?: number;
+      target_miss_reasons?: string[];
       unique_artists?: number;
       unique_artist_target?: number;
       unique_artist_target_met?: boolean;
@@ -830,6 +831,9 @@ function HomePage() {
               : ''}
             {truthSummary.curation?.composition
               ? `, retention ${typeof truthSummary.curation.composition.selection_retention_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.selection_retention_coverage * 100)}%` : 'n/a'}${truthSummary.curation.composition.selection_retention_gap ? ` (gap ${truthSummary.curation.composition.selection_retention_gap})` : ''}`
+              : ''}
+            {truthSummary.curation?.composition
+              ? `, miss reasons ${Array.isArray(truthSummary.curation.composition.target_miss_reasons) && truthSummary.curation.composition.target_miss_reasons.length > 0 ? truthSummary.curation.composition.target_miss_reasons.join('/') : 'none'}`
               : ''}
             {truthSummary.curation?.ranking_floor
               ? `, ranking floor ${truthSummary.curation.ranking_floor.applied ? 'on' : 'off'}${truthSummary.curation.ranking_floor.applied ? ` (dropped ${truthSummary.curation.ranking_floor.dropped_tracks ?? 0})` : ''}`

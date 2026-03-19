@@ -107,6 +107,9 @@ interface TruthDetails {
     };
     composition?: {
       selected_tracks: number;
+      selected_track_target: number;
+      selected_track_gap: number;
+      selected_track_coverage: number;
       unique_artists: number;
       unique_artist_target: number;
       unique_artist_target_met: boolean;
@@ -3744,6 +3747,11 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const uniqueArtists = countUniqueTrackArtists(composedCreditTracks);
     const uniqueArtistTarget = getModeUniqueArtistTarget(curationMode.mode, composedCreditTracks.length);
     const uniqueDecadeTarget = getModeUniqueDecadeTarget(curationMode.mode, composedCreditTracks.length);
+    const selectedTrackTarget = MAX_PLAYLIST_TRACKS;
+    const selectedTrackGap = Math.max(0, selectedTrackTarget - composedCreditTracks.length);
+    const selectedTrackCoverage = selectedTrackTarget > 0
+      ? Math.min(1, composedCreditTracks.length / selectedTrackTarget)
+      : 1;
     const uniqueArtistTargetGap = Math.max(0, uniqueArtistTarget - uniqueArtists);
     const uniqueDecadeTargetGap = Math.max(0, uniqueDecadeTarget - uniqueDecades.size);
     const uniqueArtistTargetCoverage = uniqueArtistTarget > 0
@@ -3771,6 +3779,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       },
       composition: {
         selected_tracks: composedCreditTracks.length,
+        selected_track_target: selectedTrackTarget,
+        selected_track_gap: selectedTrackGap,
+        selected_track_coverage: selectedTrackCoverage,
         unique_artists: uniqueArtists,
         unique_artist_target: uniqueArtistTarget,
         unique_artist_target_met: uniqueArtistTargetGap === 0,

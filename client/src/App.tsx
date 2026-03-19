@@ -121,6 +121,7 @@ interface TruthSummary {
       unique_artists?: number;
       unique_artist_target?: number;
       unique_decades?: number;
+      unique_decade_target?: number;
       max_tracks_per_artist?: number;
     };
   };
@@ -804,7 +805,7 @@ function HomePage() {
             Curation mode: <strong>{humanizeCurationMode(truthSummary.curation?.mode)}</strong>
             {truthSummary.curation?.inferred_from_prompt ? ' (prompt-inferred)' : ''}
             {truthSummary.curation?.composition
-              ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`
+              ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}/${truthSummary.curation.composition.unique_decade_target ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`
               : ''}
             {truthSummary.curation?.ranking_floor
               ? `, ranking floor ${truthSummary.curation.ranking_floor.applied ? 'on' : 'off'}${truthSummary.curation.ranking_floor.applied ? ` (dropped ${truthSummary.curation.ranking_floor.dropped_tracks ?? 0})` : ''}`

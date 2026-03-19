@@ -101,6 +101,29 @@ interface TruthSummary {
     imported: number;
     skipped_reason?: string;
   };
+  curation?: {
+    mode?: 'essential' | 'balanced' | 'deep_cuts';
+    inferred_from_prompt?: boolean;
+    ranking_floor?: {
+      applied?: boolean;
+      dropped_tracks?: number;
+      floor_score?: number;
+    };
+    composition?: {
+      selected_tracks?: number;
+      unique_artists?: number;
+      unique_artist_target?: number;
+      unique_decades?: number;
+      max_tracks_per_artist?: number;
+    };
+  };
+}
+
+function humanizeCurationMode(mode?: 'essential' | 'balanced' | 'deep_cuts'): string {
+  if (mode === 'deep_cuts') return 'deep cuts';
+  if (mode === 'essential') return 'essential';
+  if (mode === 'balanced') return 'balanced';
+  return 'n/a';
 }
 
 interface PlaylistApiResponse extends Playlist {
@@ -768,6 +791,18 @@ function HomePage() {
             <summary>Verification details</summary>
             <pre>{JSON.stringify(verification, null, 2)}</pre>
           </details>
+        )}
+        {truthSummary && (
+          <p>
+            Curation mode: <strong>{humanizeCurationMode(truthSummary.curation?.mode)}</strong>
+            {truthSummary.curation?.inferred_from_prompt ? ' (prompt-inferred)' : ''}
+            {truthSummary.curation?.composition
+              ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`
+              : ''}
+            {truthSummary.curation?.ranking_floor
+              ? `, ranking floor ${truthSummary.curation.ranking_floor.applied ? 'on' : 'off'}${truthSummary.curation.ranking_floor.applied ? ` (dropped ${truthSummary.curation.ranking_floor.dropped_tracks ?? 0})` : ''}`
+              : ''}
+          </p>
         )}
         {truthSummary && (
           <details className="verification-details">

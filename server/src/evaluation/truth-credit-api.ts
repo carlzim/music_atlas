@@ -9,6 +9,16 @@ interface TruthCreditApiCaseResult {
   details: string;
 }
 
+function getExpectedUniqueDecadeTarget(mode: 'essential' | 'balanced' | 'deep_cuts', trackCount: number): number {
+  const targetByMode: Record<'essential' | 'balanced' | 'deep_cuts', number> = {
+    essential: 2,
+    balanced: 3,
+    deep_cuts: 4,
+  };
+  const target = targetByMode[mode] || targetByMode.balanced;
+  return Math.min(Math.max(1, trackCount), target);
+}
+
 function isVariantTitle(title: string): boolean {
   return /\b(remix|mix|edit|dub|rework|version|extended|club|instrumental|remaster)\b/i.test(title || '');
 }
@@ -82,9 +92,16 @@ async function runTruthCreditApiCase(params: {
     : true;
   const curationUniqueArtists = response.truth?.curation?.composition?.unique_artists ?? null;
   const curationUniqueDecades = response.truth?.curation?.composition?.unique_decades ?? null;
+  const curationUniqueDecadeTarget = response.truth?.curation?.composition?.unique_decade_target ?? null;
   const curationTopSampleSize = Array.isArray(response.truth?.curation?.top_score_sample)
     ? response.truth!.curation!.top_score_sample!.length
     : 0;
+  const expectedUniqueDecadeTarget = params.expectedCurationMode
+    ? getExpectedUniqueDecadeTarget(params.expectedCurationMode, tracks.length)
+    : null;
+  const curationDecadeTargetPass = expectedUniqueDecadeTarget === null
+    ? true
+    : curationUniqueDecadeTarget === expectedUniqueDecadeTarget;
 
   let variantExpectationPass = true;
   if (params.expectNoVariants) {
@@ -98,12 +115,13 @@ async function runTruthCreditApiCase(params: {
     && noOutsideEvidence
     && balancedEnough
     && variantExpectationPass
-    && curationModePass;
+    && curationModePass
+    && curationDecadeTargetPass;
 
   return {
     id,
     pass,
-    details: `tracks=${tracks.length} outside_evidence=${tracksOutsideEvidence.length} max_per_artist=${maxPerArtist} max_per_album_proxy=${maxPerAlbumProxy} variants=${variantTracks.length} variant_candidates=${candidateVariantCount} curation_mode=${curationMode || 'none'} expected_mode=${params.expectedCurationMode || 'any'} curation_unique_artists=${curationUniqueArtists ?? 'n/a'} curation_unique_decades=${curationUniqueDecades ?? 'n/a'} curation_top_sample=${curationTopSampleSize} truth_attempted=${truthSync.attempted} truth_imported=${truthSync.imported} evidence_candidates=${combinedCandidates.length} used_auto_backfill=${response.verification?.used_auto_backfill === true}`,
+    details: `tracks=${tracks.length} outside_evidence=${tracksOutsideEvidence.length} max_per_artist=${maxPerArtist} max_per_album_proxy=${maxPerAlbumProxy} variants=${variantTracks.length} variant_candidates=${candidateVariantCount} curation_mode=${curationMode || 'none'} expected_mode=${params.expectedCurationMode || 'any'} curation_unique_artists=${curationUniqueArtists ?? 'n/a'} curation_unique_decades=${curationUniqueDecades ?? 'n/a'} curation_unique_decade_target=${curationUniqueDecadeTarget ?? 'n/a'} expected_unique_decade_target=${expectedUniqueDecadeTarget ?? 'n/a'} curation_top_sample=${curationTopSampleSize} truth_attempted=${truthSync.attempted} truth_imported=${truthSync.imported} evidence_candidates=${combinedCandidates.length} used_auto_backfill=${response.verification?.used_auto_backfill === true}`,
   };
 }
 

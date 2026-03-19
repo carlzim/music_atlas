@@ -217,7 +217,7 @@ Returned diagnostics in `truth.curation`:
 
 - `mode`, `inferred_from_prompt`
 - `top_score_sample` (top candidate score breakdown)
-- `composition` summary (`selected_tracks`, `unique_artists`, `unique_decades`)
+- `composition` summary (`selected_tracks`, `unique_artists`, `unique_artist_target`, `unique_decades`, `unique_decade_target`, `max_tracks_per_artist`)
 
 ## If A Check Fails
 

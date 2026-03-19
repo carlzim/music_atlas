@@ -130,6 +130,7 @@ interface TruthSummary {
       target_met_reasons?: string[];
       target_miss_count?: number;
       target_miss_reasons?: string[];
+      target_consistency_ok?: boolean;
       target_size_met?: boolean;
       target_retention_met?: boolean;
       target_artist_met?: boolean;
@@ -846,6 +847,9 @@ function HomePage() {
               : ''}
             {truthSummary.curation?.composition
               ? `, met reasons ${Array.isArray(truthSummary.curation.composition.target_met_reasons) && truthSummary.curation.composition.target_met_reasons.length > 0 ? truthSummary.curation.composition.target_met_reasons.join('/') : 'none'}`
+              : ''}
+            {truthSummary.curation?.composition
+              ? `, target consistency ${truthSummary.curation.composition.target_consistency_ok === true ? 'ok' : truthSummary.curation.composition.target_consistency_ok === false ? 'mismatch' : 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
               ? `, target status size ${truthSummary.curation.composition.target_size_met === true ? 'ok' : truthSummary.curation.composition.target_size_met === false ? 'miss' : 'n/a'} retention ${truthSummary.curation.composition.target_retention_met === true ? 'ok' : truthSummary.curation.composition.target_retention_met === false ? 'miss' : 'n/a'} artist ${truthSummary.curation.composition.target_artist_met === true ? 'ok' : truthSummary.curation.composition.target_artist_met === false ? 'miss' : 'n/a'} decade ${truthSummary.curation.composition.target_decade_met === true ? 'ok' : truthSummary.curation.composition.target_decade_met === false ? 'miss' : 'n/a'}`

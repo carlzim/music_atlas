@@ -113,6 +113,8 @@ interface TruthSummary {
       applied?: boolean;
       input_tracks?: number;
       kept_tracks?: number;
+      unique_artists?: number;
+      max_tracks_per_artist?: number;
     };
     composition?: {
       selected_tracks?: number;
@@ -808,7 +810,7 @@ function HomePage() {
               ? `, ranking floor ${truthSummary.curation.ranking_floor.applied ? 'on' : 'off'}${truthSummary.curation.ranking_floor.applied ? ` (dropped ${truthSummary.curation.ranking_floor.dropped_tracks ?? 0})` : ''}`
               : ''}
             {truthSummary.curation?.ranking_window
-              ? `, ranking window ${truthSummary.curation.ranking_window.applied ? `${truthSummary.curation.ranking_window.kept_tracks ?? 'n/a'}/${truthSummary.curation.ranking_window.input_tracks ?? 'n/a'}` : 'full'}`
+              ? `, ranking window ${truthSummary.curation.ranking_window.applied ? `${truthSummary.curation.ranking_window.kept_tracks ?? 'n/a'}/${truthSummary.curation.ranking_window.input_tracks ?? 'n/a'}` : 'full'}${truthSummary.curation.ranking_window.unique_artists ? ` (artists ${truthSummary.curation.ranking_window.unique_artists}, max/artist ${truthSummary.curation.ranking_window.max_tracks_per_artist ?? 'n/a'})` : ''}`
               : ''}
           </p>
         )}

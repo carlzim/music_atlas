@@ -102,6 +102,8 @@ interface TruthDetails {
       applied: boolean;
       input_tracks: number;
       kept_tracks: number;
+      unique_artists: number;
+      max_tracks_per_artist: number;
     };
     composition?: {
       selected_tracks: number;
@@ -2393,6 +2395,54 @@ function getModeRankingWindowSize(mode: PlaylistCurationMode): number {
   return MAX_PLAYLIST_TRACKS;
 }
 
+function buildDiverseRankingWindow(
+  rankedTracks: Track[],
+  mode: PlaylistCurationMode,
+  windowSize: number
+): Track[] {
+  if (rankedTracks.length <= windowSize) return rankedTracks;
+
+  const perArtistCapByMode: Record<PlaylistCurationMode, number> = {
+    essential: 4,
+    balanced: 3,
+    deep_cuts: 2,
+  };
+  const perArtistCap = perArtistCapByMode[mode] || perArtistCapByMode.balanced;
+
+  const selected: Track[] = [];
+  const selectedKeys = new Set<string>();
+  const artistCounts = new Map<string, number>();
+
+  const trackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
+
+  for (const track of rankedTracks) {
+    if (selected.length >= windowSize) break;
+    const key = trackKey(track);
+    if (!key || selectedKeys.has(key)) continue;
+
+    const artistKey = normalize(track.artist);
+    if (!artistKey) continue;
+    const count = artistCounts.get(artistKey) || 0;
+    if (count >= perArtistCap) continue;
+
+    selected.push(track);
+    selectedKeys.add(key);
+    artistCounts.set(artistKey, count + 1);
+  }
+
+  if (selected.length < windowSize) {
+    for (const track of rankedTracks) {
+      if (selected.length >= windowSize) break;
+      const key = trackKey(track);
+      if (!key || selectedKeys.has(key)) continue;
+      selected.push(track);
+      selectedKeys.add(key);
+    }
+  }
+
+  return selected;
+}
+
 function getMaxTracksPerArtist(tracks: Track[]): number {
   const counts = new Map<string, number>();
   let max = 0;
@@ -3644,7 +3694,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
     const rankingWindowSize = getModeRankingWindowSize(curationMode.mode);
     const rankingWindowInputCount = prominenceRanking.tracks.length;
-    const rankingWindowTracks = prominenceRanking.tracks.slice(0, rankingWindowSize);
+    const rankingWindowTracks = buildDiverseRankingWindow(prominenceRanking.tracks, curationMode.mode, rankingWindowSize);
     const rankingWindowApplied = rankingWindowTracks.length < rankingWindowInputCount;
 
     let composedCreditTracks = await rerankVerifiedCreditTracksWithGemini(
@@ -3676,6 +3726,8 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         applied: rankingWindowApplied,
         input_tracks: rankingWindowInputCount,
         kept_tracks: rankingWindowTracks.length,
+        unique_artists: countUniqueTrackArtists(rankingWindowTracks),
+        max_tracks_per_artist: getMaxTracksPerArtist(rankingWindowTracks),
       },
       composition: {
         selected_tracks: composedCreditTracks.length,

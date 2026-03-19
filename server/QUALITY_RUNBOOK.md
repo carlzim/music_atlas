@@ -189,6 +189,36 @@ Quick interpretation:
 - High `searchPrefixArtistMatches` or `searchAliasArtistMatches`: generation still emits truncated names; guardrails are rescuing matches.
 - High featured/display fallback attempts with low matches: collaboration text is being parsed, but query forms still need tuning.
 
+### Credit playlist curation modes (producer/engineer/arranger)
+
+Credit prompts now use a prompt-driven curation mode to improve prominence and representativeness after factual retrieval.
+
+- Modes:
+  - `balanced` (default)
+  - `essential` (triggered by intent like `best`, `greatest`, `most iconic`, `signature`, `essential`)
+  - `deep_cuts` (triggered by intent like `unknown`, `obscure`, `underrated`, `deep cuts`, `hidden gems`, `b-sides`)
+- Conflict rule: if both essential and deep-cut intents appear, `deep_cuts` wins.
+
+Pipeline for credit prompts:
+
+1. Retrieval (verified truth/evidence candidates)
+2. Ranking (component scoring)
+3. Composition (mode-aware balance by artist/decade)
+
+Scoring components used in ranking diagnostics:
+
+- `relevance_to_query`
+- `prominence_score`
+- `artist_canonical_score`
+- `entity_signature_score`
+- `diversity_adjustment`
+
+Returned diagnostics in `truth.curation`:
+
+- `mode`, `inferred_from_prompt`
+- `top_score_sample` (top candidate score breakdown)
+- `composition` summary (`selected_tracks`, `unique_artists`, `unique_decades`)
+
 ## If A Check Fails
 
 1. Run `npm run eval:coverage` to inspect current counts.

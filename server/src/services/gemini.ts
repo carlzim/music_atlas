@@ -110,6 +110,7 @@ interface TruthDetails {
       unique_artists: number;
       unique_artist_target: number;
       unique_decades: number;
+      unique_decade_target: number;
       max_tracks_per_artist: number;
     };
   };
@@ -2389,6 +2390,16 @@ function getModeUniqueArtistTarget(mode: PlaylistCurationMode, desiredCount: num
   return Math.min(desiredCount, Math.max(3, Math.floor(desiredCount * ratio)));
 }
 
+function getModeUniqueDecadeTarget(mode: PlaylistCurationMode, desiredCount: number): number {
+  const targetByMode: Record<PlaylistCurationMode, number> = {
+    essential: 2,
+    balanced: 3,
+    deep_cuts: 4,
+  };
+  const target = targetByMode[mode] || targetByMode.balanced;
+  return Math.min(desiredCount, Math.max(1, target));
+}
+
 function getModeRankingWindowSize(mode: PlaylistCurationMode): number {
   if (mode === 'essential') return 16;
   if (mode === 'balanced') return 22;
@@ -2482,6 +2493,7 @@ function composeCreditTracksByMode(
   const caps = modeCaps[mode] || modeCaps.balanced;
   const hardArtistCap = hardArtistCapByMode[mode] || hardArtistCapByMode.balanced;
   const uniqueArtistTarget = getModeUniqueArtistTarget(mode, desiredCount);
+  const uniqueDecadeTarget = getModeUniqueDecadeTarget(mode, desiredCount);
 
   const trackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
   const canUseTrack = (track: Track, artistCap: number, decadeCap: number): boolean => {
@@ -2535,6 +2547,17 @@ function composeCreditTracksByMode(
       const artistKey = normalize(track.artist);
       if (!artistKey || artistCounts.has(artistKey)) continue;
       if (!canUseTrack(track, 1, caps.decadeCapPrimary + 1)) continue;
+      addTrack(track);
+    }
+  }
+
+  if (uniqueDecadeTarget > 1) {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      if (decadeCounts.size >= uniqueDecadeTarget) break;
+      const decade = getTrackDecade(track);
+      if (decade === null || decadeCounts.has(decade)) continue;
+      if (!canUseTrack(track, caps.artistCapPrimary + 1, caps.decadeCapPrimary + 1)) continue;
       addTrack(track);
     }
   }
@@ -3734,6 +3757,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         unique_artists: countUniqueTrackArtists(composedCreditTracks),
         unique_artist_target: getModeUniqueArtistTarget(curationMode.mode, composedCreditTracks.length),
         unique_decades: uniqueDecades.size,
+        unique_decade_target: getModeUniqueDecadeTarget(curationMode.mode, composedCreditTracks.length),
         max_tracks_per_artist: getMaxTracksPerArtist(composedCreditTracks),
       },
     };

@@ -108,6 +108,7 @@ interface TruthDetails {
     composition?: {
       selected_tracks: number;
       selected_track_target: number;
+      selected_track_target_met: boolean;
       selected_track_gap: number;
       selected_track_coverage: number;
       selection_retention_gap: number;
@@ -3786,6 +3787,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       composition: {
         selected_tracks: composedCreditTracks.length,
         selected_track_target: selectedTrackTarget,
+        selected_track_target_met: selectedTrackGap === 0,
         selected_track_gap: selectedTrackGap,
         selected_track_coverage: selectedTrackCoverage,
         selection_retention_gap: selectionRetentionGap,

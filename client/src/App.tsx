@@ -119,6 +119,7 @@ interface TruthSummary {
     composition?: {
       selected_tracks?: number;
       selected_track_target?: number;
+      selected_track_target_met?: boolean;
       selected_track_gap?: number;
       selected_track_coverage?: number;
       selection_retention_gap?: number;
@@ -819,7 +820,7 @@ function HomePage() {
               ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}/${truthSummary.curation.composition.unique_decade_target ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
-              ? `, size ${truthSummary.curation.composition.selected_tracks ?? 'n/a'}/${truthSummary.curation.composition.selected_track_target ?? 'n/a'}${truthSummary.curation.composition.selected_track_gap ? ` (gap ${truthSummary.curation.composition.selected_track_gap})` : ''}`
+              ? `, size ${truthSummary.curation.composition.selected_tracks ?? 'n/a'}/${truthSummary.curation.composition.selected_track_target ?? 'n/a'}${truthSummary.curation.composition.selected_track_target_met === true ? ' (met)' : truthSummary.curation.composition.selected_track_target_met === false ? ` (miss, gap ${truthSummary.curation.composition.selected_track_gap ?? 'n/a'})` : truthSummary.curation.composition.selected_track_gap ? ` (gap ${truthSummary.curation.composition.selected_track_gap})` : ''}`
               : ''}
             {truthSummary.curation?.composition
               ? `, targets artist ${truthSummary.curation.composition.unique_artist_target_met === true ? 'met' : truthSummary.curation.composition.unique_artist_target_met === false ? `miss (gap ${truthSummary.curation.composition.unique_artist_target_gap ?? 'n/a'})` : 'n/a'} decade ${truthSummary.curation.composition.unique_decade_target_met === true ? 'met' : truthSummary.curation.composition.unique_decade_target_met === false ? `miss (gap ${truthSummary.curation.composition.unique_decade_target_gap ?? 'n/a'})` : 'n/a'}`

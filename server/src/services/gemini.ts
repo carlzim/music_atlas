@@ -1926,6 +1926,13 @@ function rankVerifiedCreditTracksByProminence(
     artistTrackCounts.set(key, (artistTrackCounts.get(key) || 0) + 1);
   }
 
+  const decadeTrackCounts = new Map<number, number>();
+  for (const track of tracks) {
+    const decade = getTrackDecade(track);
+    if (decade === null) continue;
+    decadeTrackCounts.set(decade, (decadeTrackCounts.get(decade) || 0) + 1);
+  }
+
   const modeWeights: Record<PlaylistCurationMode, {
     relevance: number;
     prominence: number;
@@ -2009,6 +2016,18 @@ function rankVerifiedCreditTracksByProminence(
     const artistCount = artistTrackCounts.get(foldedArtist) || 1;
     if (artistCount > 1) {
       diversityAdjustment -= (artistCount - 1) * 10;
+    }
+
+    const decade = getTrackDecade(track);
+    if (decade !== null) {
+      const decadeCount = decadeTrackCounts.get(decade) || 1;
+      if (mode === 'deep_cuts') {
+        diversityAdjustment += Math.max(-16, 14 - decadeCount * 3);
+      } else if (mode === 'essential') {
+        diversityAdjustment += Math.max(-8, 6 - decadeCount);
+      } else {
+        diversityAdjustment += Math.max(-12, 10 - decadeCount * 2);
+      }
     }
 
     if (mode === 'deep_cuts') {

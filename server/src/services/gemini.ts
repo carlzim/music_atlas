@@ -1856,6 +1856,26 @@ function rankVerifiedCreditTracksByProminence(
   const truthCandidates = getTruthCreditCandidates(creditName, creditRole, 500);
   const evidenceCandidates = getTracksByRecordingCreditEvidence(creditName, creditRole, 500);
 
+  const truthArtistProminence = new Map<string, number>();
+  for (const row of truthCandidates) {
+    const key = foldForCreditEvidenceMatch(row.artist);
+    if (!key) continue;
+    const confidence = typeof row.confidence === 'number' && Number.isFinite(row.confidence)
+      ? Math.max(0, Math.min(100, row.confidence))
+      : 0;
+    truthArtistProminence.set(key, (truthArtistProminence.get(key) || 0) + confidence);
+  }
+
+  const evidenceArtistProminence = new Map<string, number>();
+  for (const row of evidenceCandidates) {
+    const key = foldForCreditEvidenceMatch(row.artist);
+    if (!key) continue;
+    const evidenceCount = typeof row.evidence_count === 'number' && Number.isFinite(row.evidence_count)
+      ? Math.max(1, Math.floor(row.evidence_count))
+      : 1;
+    evidenceArtistProminence.set(key, (evidenceArtistProminence.get(key) || 0) + evidenceCount);
+  }
+
   const preferredArtistKeys = new Set(
     preferredArtists.map((value) => foldForCreditEvidenceMatch(value)).filter((value) => value.length > 0)
   );
@@ -1868,6 +1888,16 @@ function rankVerifiedCreditTracksByProminence(
 
     if (preferredArtistKeys.has(foldedArtist)) {
       score += 40;
+    }
+
+    const truthProminence = truthArtistProminence.get(foldedArtist) || 0;
+    if (truthProminence > 0) {
+      score += Math.min(180, truthProminence * 0.6);
+    }
+
+    const evidenceProminence = evidenceArtistProminence.get(foldedArtist) || 0;
+    if (evidenceProminence > 0) {
+      score += Math.min(120, evidenceProminence * 12);
     }
 
     for (const work of preferredWorks) {
@@ -1885,7 +1915,14 @@ function rankVerifiedCreditTracksByProminence(
     for (const row of evidenceCandidates) {
       if (foldForCreditEvidenceMatch(row.artist) !== foldedArtist) continue;
       if (!titlesLikelySameForCreditEvidence(track.song, row.title)) continue;
-      score += 100;
+      const evidenceCount = typeof row.evidence_count === 'number' && Number.isFinite(row.evidence_count)
+        ? Math.max(1, Math.floor(row.evidence_count))
+        : 1;
+      score += 90 + Math.min(120, evidenceCount * 15);
+    }
+
+    if (score < 60) {
+      score -= 25;
     }
 
     return score - index * 0.001;

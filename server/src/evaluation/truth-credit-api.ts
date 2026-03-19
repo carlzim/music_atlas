@@ -91,8 +91,11 @@ async function runTruthCreditApiCase(params: {
     ? curationMode === params.expectedCurationMode
     : true;
   const curationUniqueArtists = response.truth?.curation?.composition?.unique_artists ?? null;
+  const curationUniqueArtistTarget = response.truth?.curation?.composition?.unique_artist_target ?? null;
+  const curationUniqueArtistTargetMet = response.truth?.curation?.composition?.unique_artist_target_met ?? null;
   const curationUniqueDecades = response.truth?.curation?.composition?.unique_decades ?? null;
   const curationUniqueDecadeTarget = response.truth?.curation?.composition?.unique_decade_target ?? null;
+  const curationUniqueDecadeTargetMet = response.truth?.curation?.composition?.unique_decade_target_met ?? null;
   const curationTopSampleSize = Array.isArray(response.truth?.curation?.top_score_sample)
     ? response.truth!.curation!.top_score_sample!.length
     : 0;
@@ -102,6 +105,18 @@ async function runTruthCreditApiCase(params: {
   const curationDecadeTargetPass = expectedUniqueDecadeTarget === null
     ? true
     : curationUniqueDecadeTarget === expectedUniqueDecadeTarget;
+  const expectedArtistTargetMet = curationUniqueArtists !== null && curationUniqueArtistTarget !== null
+    ? curationUniqueArtists >= curationUniqueArtistTarget
+    : null;
+  const artistTargetMetPass = expectedArtistTargetMet === null
+    ? true
+    : curationUniqueArtistTargetMet === expectedArtistTargetMet;
+  const expectedDecadeTargetMet = curationUniqueDecades !== null && curationUniqueDecadeTarget !== null
+    ? curationUniqueDecades >= curationUniqueDecadeTarget
+    : null;
+  const decadeTargetMetPass = expectedDecadeTargetMet === null
+    ? true
+    : curationUniqueDecadeTargetMet === expectedDecadeTargetMet;
 
   let variantExpectationPass = true;
   if (params.expectNoVariants) {
@@ -116,12 +131,14 @@ async function runTruthCreditApiCase(params: {
     && balancedEnough
     && variantExpectationPass
     && curationModePass
-    && curationDecadeTargetPass;
+    && curationDecadeTargetPass
+    && artistTargetMetPass
+    && decadeTargetMetPass;
 
   return {
     id,
     pass,
-    details: `tracks=${tracks.length} outside_evidence=${tracksOutsideEvidence.length} max_per_artist=${maxPerArtist} max_per_album_proxy=${maxPerAlbumProxy} variants=${variantTracks.length} variant_candidates=${candidateVariantCount} curation_mode=${curationMode || 'none'} expected_mode=${params.expectedCurationMode || 'any'} curation_unique_artists=${curationUniqueArtists ?? 'n/a'} curation_unique_decades=${curationUniqueDecades ?? 'n/a'} curation_unique_decade_target=${curationUniqueDecadeTarget ?? 'n/a'} expected_unique_decade_target=${expectedUniqueDecadeTarget ?? 'n/a'} curation_top_sample=${curationTopSampleSize} truth_attempted=${truthSync.attempted} truth_imported=${truthSync.imported} evidence_candidates=${combinedCandidates.length} used_auto_backfill=${response.verification?.used_auto_backfill === true}`,
+    details: `tracks=${tracks.length} outside_evidence=${tracksOutsideEvidence.length} max_per_artist=${maxPerArtist} max_per_album_proxy=${maxPerAlbumProxy} variants=${variantTracks.length} variant_candidates=${candidateVariantCount} curation_mode=${curationMode || 'none'} expected_mode=${params.expectedCurationMode || 'any'} curation_unique_artists=${curationUniqueArtists ?? 'n/a'} curation_unique_artist_target=${curationUniqueArtistTarget ?? 'n/a'} curation_unique_artist_target_met=${curationUniqueArtistTargetMet ?? 'n/a'} expected_unique_artist_target_met=${expectedArtistTargetMet ?? 'n/a'} curation_unique_decades=${curationUniqueDecades ?? 'n/a'} curation_unique_decade_target=${curationUniqueDecadeTarget ?? 'n/a'} expected_unique_decade_target=${expectedUniqueDecadeTarget ?? 'n/a'} curation_unique_decade_target_met=${curationUniqueDecadeTargetMet ?? 'n/a'} expected_unique_decade_target_met=${expectedDecadeTargetMet ?? 'n/a'} curation_top_sample=${curationTopSampleSize} truth_attempted=${truthSync.attempted} truth_imported=${truthSync.imported} evidence_candidates=${combinedCandidates.length} used_auto_backfill=${response.verification?.used_auto_backfill === true}`,
   };
 }
 

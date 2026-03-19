@@ -9,6 +9,10 @@ interface TruthCreditApiCaseResult {
   details: string;
 }
 
+function nearlyEqual(a: number, b: number): boolean {
+  return Math.abs(a - b) < 1e-9;
+}
+
 function getExpectedUniqueDecadeTarget(mode: 'essential' | 'balanced' | 'deep_cuts', trackCount: number): number {
   const targetByMode: Record<'essential' | 'balanced' | 'deep_cuts', number> = {
     essential: 2,
@@ -94,10 +98,12 @@ async function runTruthCreditApiCase(params: {
   const curationUniqueArtistTarget = response.truth?.curation?.composition?.unique_artist_target ?? null;
   const curationUniqueArtistTargetMet = response.truth?.curation?.composition?.unique_artist_target_met ?? null;
   const curationUniqueArtistTargetGap = response.truth?.curation?.composition?.unique_artist_target_gap ?? null;
+  const curationUniqueArtistTargetCoverage = response.truth?.curation?.composition?.unique_artist_target_coverage ?? null;
   const curationUniqueDecades = response.truth?.curation?.composition?.unique_decades ?? null;
   const curationUniqueDecadeTarget = response.truth?.curation?.composition?.unique_decade_target ?? null;
   const curationUniqueDecadeTargetMet = response.truth?.curation?.composition?.unique_decade_target_met ?? null;
   const curationUniqueDecadeTargetGap = response.truth?.curation?.composition?.unique_decade_target_gap ?? null;
+  const curationUniqueDecadeTargetCoverage = response.truth?.curation?.composition?.unique_decade_target_coverage ?? null;
   const curationTopSampleSize = Array.isArray(response.truth?.curation?.top_score_sample)
     ? response.truth!.curation!.top_score_sample!.length
     : 0;
@@ -119,6 +125,12 @@ async function runTruthCreditApiCase(params: {
   const artistTargetGapPass = expectedArtistTargetGap === null
     ? true
     : curationUniqueArtistTargetGap === expectedArtistTargetGap;
+  const expectedArtistTargetCoverage = curationUniqueArtists !== null && curationUniqueArtistTarget !== null && curationUniqueArtistTarget > 0
+    ? Math.min(1, curationUniqueArtists / curationUniqueArtistTarget)
+    : null;
+  const artistTargetCoveragePass = expectedArtistTargetCoverage === null
+    ? true
+    : (typeof curationUniqueArtistTargetCoverage === 'number' && nearlyEqual(curationUniqueArtistTargetCoverage, expectedArtistTargetCoverage));
   const expectedDecadeTargetMet = curationUniqueDecades !== null && curationUniqueDecadeTarget !== null
     ? curationUniqueDecades >= curationUniqueDecadeTarget
     : null;
@@ -131,6 +143,12 @@ async function runTruthCreditApiCase(params: {
   const decadeTargetGapPass = expectedDecadeTargetGap === null
     ? true
     : curationUniqueDecadeTargetGap === expectedDecadeTargetGap;
+  const expectedDecadeTargetCoverage = curationUniqueDecades !== null && curationUniqueDecadeTarget !== null && curationUniqueDecadeTarget > 0
+    ? Math.min(1, curationUniqueDecades / curationUniqueDecadeTarget)
+    : null;
+  const decadeTargetCoveragePass = expectedDecadeTargetCoverage === null
+    ? true
+    : (typeof curationUniqueDecadeTargetCoverage === 'number' && nearlyEqual(curationUniqueDecadeTargetCoverage, expectedDecadeTargetCoverage));
 
   let variantExpectationPass = true;
   if (params.expectNoVariants) {
@@ -148,13 +166,15 @@ async function runTruthCreditApiCase(params: {
     && curationDecadeTargetPass
     && artistTargetMetPass
     && artistTargetGapPass
+    && artistTargetCoveragePass
     && decadeTargetMetPass
-    && decadeTargetGapPass;
+    && decadeTargetGapPass
+    && decadeTargetCoveragePass;
 
   return {
     id,
     pass,
-    details: `tracks=${tracks.length} outside_evidence=${tracksOutsideEvidence.length} max_per_artist=${maxPerArtist} max_per_album_proxy=${maxPerAlbumProxy} variants=${variantTracks.length} variant_candidates=${candidateVariantCount} curation_mode=${curationMode || 'none'} expected_mode=${params.expectedCurationMode || 'any'} curation_unique_artists=${curationUniqueArtists ?? 'n/a'} curation_unique_artist_target=${curationUniqueArtistTarget ?? 'n/a'} curation_unique_artist_target_met=${curationUniqueArtistTargetMet ?? 'n/a'} expected_unique_artist_target_met=${expectedArtistTargetMet ?? 'n/a'} curation_unique_artist_target_gap=${curationUniqueArtistTargetGap ?? 'n/a'} expected_unique_artist_target_gap=${expectedArtistTargetGap ?? 'n/a'} curation_unique_decades=${curationUniqueDecades ?? 'n/a'} curation_unique_decade_target=${curationUniqueDecadeTarget ?? 'n/a'} expected_unique_decade_target=${expectedUniqueDecadeTarget ?? 'n/a'} curation_unique_decade_target_met=${curationUniqueDecadeTargetMet ?? 'n/a'} expected_unique_decade_target_met=${expectedDecadeTargetMet ?? 'n/a'} curation_unique_decade_target_gap=${curationUniqueDecadeTargetGap ?? 'n/a'} expected_unique_decade_target_gap=${expectedDecadeTargetGap ?? 'n/a'} curation_top_sample=${curationTopSampleSize} truth_attempted=${truthSync.attempted} truth_imported=${truthSync.imported} evidence_candidates=${combinedCandidates.length} used_auto_backfill=${response.verification?.used_auto_backfill === true}`,
+    details: `tracks=${tracks.length} outside_evidence=${tracksOutsideEvidence.length} max_per_artist=${maxPerArtist} max_per_album_proxy=${maxPerAlbumProxy} variants=${variantTracks.length} variant_candidates=${candidateVariantCount} curation_mode=${curationMode || 'none'} expected_mode=${params.expectedCurationMode || 'any'} curation_unique_artists=${curationUniqueArtists ?? 'n/a'} curation_unique_artist_target=${curationUniqueArtistTarget ?? 'n/a'} curation_unique_artist_target_met=${curationUniqueArtistTargetMet ?? 'n/a'} expected_unique_artist_target_met=${expectedArtistTargetMet ?? 'n/a'} curation_unique_artist_target_gap=${curationUniqueArtistTargetGap ?? 'n/a'} expected_unique_artist_target_gap=${expectedArtistTargetGap ?? 'n/a'} curation_unique_artist_target_coverage=${curationUniqueArtistTargetCoverage ?? 'n/a'} expected_unique_artist_target_coverage=${expectedArtistTargetCoverage ?? 'n/a'} curation_unique_decades=${curationUniqueDecades ?? 'n/a'} curation_unique_decade_target=${curationUniqueDecadeTarget ?? 'n/a'} expected_unique_decade_target=${expectedUniqueDecadeTarget ?? 'n/a'} curation_unique_decade_target_met=${curationUniqueDecadeTargetMet ?? 'n/a'} expected_unique_decade_target_met=${expectedDecadeTargetMet ?? 'n/a'} curation_unique_decade_target_gap=${curationUniqueDecadeTargetGap ?? 'n/a'} expected_unique_decade_target_gap=${expectedDecadeTargetGap ?? 'n/a'} curation_unique_decade_target_coverage=${curationUniqueDecadeTargetCoverage ?? 'n/a'} expected_unique_decade_target_coverage=${expectedDecadeTargetCoverage ?? 'n/a'} curation_top_sample=${curationTopSampleSize} truth_attempted=${truthSync.attempted} truth_imported=${truthSync.imported} evidence_candidates=${combinedCandidates.length} used_auto_backfill=${response.verification?.used_auto_backfill === true}`,
   };
 }
 

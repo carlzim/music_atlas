@@ -217,7 +217,7 @@ Returned diagnostics in `truth.curation`:
 
 - `mode`, `inferred_from_prompt`
 - `top_score_sample` (top candidate score breakdown)
-- `composition` summary (`selected_tracks`, `selected_track_target`, `selected_track_gap`, `selected_track_coverage`, `unique_artists`, `unique_artist_target`, `unique_artist_target_met`, `unique_artist_target_gap`, `unique_artist_target_coverage`, `unique_decades`, `unique_decade_target`, `unique_decade_target_met`, `unique_decade_target_gap`, `unique_decade_target_coverage`, `max_tracks_per_artist`)
+- `composition` summary (`selected_tracks`, `selected_track_target`, `selected_track_gap`, `selected_track_coverage`, `selection_retention_gap`, `selection_retention_coverage`, `unique_artists`, `unique_artist_target`, `unique_artist_target_met`, `unique_artist_target_gap`, `unique_artist_target_coverage`, `unique_decades`, `unique_decade_target`, `unique_decade_target_met`, `unique_decade_target_gap`, `unique_decade_target_coverage`, `max_tracks_per_artist`)
 
 ## If A Check Fails
 

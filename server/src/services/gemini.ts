@@ -110,6 +110,8 @@ interface TruthDetails {
       selected_track_target: number;
       selected_track_gap: number;
       selected_track_coverage: number;
+      selection_retention_gap: number;
+      selection_retention_coverage: number;
       unique_artists: number;
       unique_artist_target: number;
       unique_artist_target_met: boolean;
@@ -3752,6 +3754,10 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const selectedTrackCoverage = selectedTrackTarget > 0
       ? Math.min(1, composedCreditTracks.length / selectedTrackTarget)
       : 1;
+    const selectionRetentionGap = Math.max(0, rankingWindowTracks.length - composedCreditTracks.length);
+    const selectionRetentionCoverage = rankingWindowTracks.length > 0
+      ? Math.min(1, composedCreditTracks.length / rankingWindowTracks.length)
+      : 1;
     const uniqueArtistTargetGap = Math.max(0, uniqueArtistTarget - uniqueArtists);
     const uniqueDecadeTargetGap = Math.max(0, uniqueDecadeTarget - uniqueDecades.size);
     const uniqueArtistTargetCoverage = uniqueArtistTarget > 0
@@ -3782,6 +3788,8 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         selected_track_target: selectedTrackTarget,
         selected_track_gap: selectedTrackGap,
         selected_track_coverage: selectedTrackCoverage,
+        selection_retention_gap: selectionRetentionGap,
+        selection_retention_coverage: selectionRetentionCoverage,
         unique_artists: uniqueArtists,
         unique_artist_target: uniqueArtistTarget,
         unique_artist_target_met: uniqueArtistTargetGap === 0,

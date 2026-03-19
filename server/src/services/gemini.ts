@@ -103,6 +103,7 @@ interface TruthDetails {
       unique_artists: number;
       unique_artist_target: number;
       unique_decades: number;
+      max_tracks_per_artist: number;
     };
   };
 }
@@ -2381,6 +2382,19 @@ function getModeUniqueArtistTarget(mode: PlaylistCurationMode, desiredCount: num
   return Math.min(desiredCount, Math.max(3, Math.floor(desiredCount * ratio)));
 }
 
+function getMaxTracksPerArtist(tracks: Track[]): number {
+  const counts = new Map<string, number>();
+  let max = 0;
+  for (const track of tracks) {
+    const key = normalize(track.artist);
+    if (!key) continue;
+    const next = (counts.get(key) || 0) + 1;
+    counts.set(key, next);
+    if (next > max) max = next;
+  }
+  return max;
+}
+
 function composeCreditTracksByMode(
   tracks: Track[],
   mode: PlaylistCurationMode,
@@ -2399,7 +2413,13 @@ function composeCreditTracksByMode(
     balanced: { artistCapPrimary: 2, decadeCapPrimary: 4 },
     deep_cuts: { artistCapPrimary: 2, decadeCapPrimary: 3 },
   };
+  const hardArtistCapByMode: Record<PlaylistCurationMode, number> = {
+    essential: 4,
+    balanced: 3,
+    deep_cuts: 2,
+  };
   const caps = modeCaps[mode] || modeCaps.balanced;
+  const hardArtistCap = hardArtistCapByMode[mode] || hardArtistCapByMode.balanced;
   const uniqueArtistTarget = getModeUniqueArtistTarget(mode, desiredCount);
 
   const trackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
@@ -2461,6 +2481,14 @@ function composeCreditTracksByMode(
   addPass(caps.artistCapPrimary, caps.decadeCapPrimary);
   if (selected.length < desiredCount) addPass(caps.artistCapPrimary + 1, caps.decadeCapPrimary + 2);
   if (selected.length < desiredCount) addPass(caps.artistCapPrimary + 2, caps.decadeCapPrimary + 4);
+
+  if (selected.length < desiredCount) {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      if (!canUseTrack(track, hardArtistCap, caps.decadeCapPrimary + 6)) continue;
+      addTrack(track);
+    }
+  }
 
   if (selected.length < desiredCount) {
     for (const track of tracks) {
@@ -3633,6 +3661,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         unique_artists: countUniqueTrackArtists(composedCreditTracks),
         unique_artist_target: getModeUniqueArtistTarget(curationMode.mode, composedCreditTracks.length),
         unique_decades: uniqueDecades.size,
+        max_tracks_per_artist: getMaxTracksPerArtist(composedCreditTracks),
       },
     };
   }

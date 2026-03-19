@@ -19,6 +19,8 @@ interface Track {
   release_year?: number | null;
 }
 
+type PlaylistCurationMode = 'essential' | 'balanced' | 'deep_cuts';
+
 interface InfluenceEdge {
   from: string;
   to: string;
@@ -77,6 +79,20 @@ interface TruthDetails {
     attempted: boolean;
     imported: number;
     skipped_reason?: string;
+  };
+  curation?: {
+    mode: PlaylistCurationMode;
+    inferred_from_prompt: boolean;
+    top_score_sample?: Array<{
+      artist: string;
+      song: string;
+      final_score: number;
+      relevance_to_query: number;
+      prominence_score: number;
+      artist_canonical_score: number;
+      entity_signature_score: number;
+      diversity_adjustment: number;
+    }>;
   };
 }
 
@@ -1845,13 +1861,30 @@ function rankVerifiedCreditTracksByProminence(
   tracks: Track[],
   constraint: PromptConstraint | null,
   preferredArtists: string[] = [],
-  preferredWorks: Array<{ artist: string; song: string }> = []
-): Track[] {
-  if (!constraint || constraint.kind !== 'credit' || tracks.length <= 1) return tracks;
+  preferredWorks: Array<{ artist: string; song: string }> = [],
+  mode: PlaylistCurationMode = 'balanced'
+): {
+  tracks: Track[];
+  topScoreSample: Array<{
+    artist: string;
+    song: string;
+    final_score: number;
+    relevance_to_query: number;
+    prominence_score: number;
+    artist_canonical_score: number;
+    entity_signature_score: number;
+    diversity_adjustment: number;
+  }>;
+} {
+  if (!constraint || constraint.kind !== 'credit' || tracks.length <= 1) {
+    return { tracks, topScoreSample: [] };
+  }
 
   const creditName = (constraint.value || '').trim();
   const creditRole = (constraint.creditRole || '').trim();
-  if (!creditName || !creditRole) return tracks;
+  if (!creditName || !creditRole) {
+    return { tracks, topScoreSample: [] };
+  }
 
   const truthCandidates = getTruthCreditCandidates(creditName, creditRole, 500);
   const evidenceCandidates = getTracksByRecordingCreditEvidence(creditName, creditRole, 500);
@@ -1880,36 +1913,80 @@ function rankVerifiedCreditTracksByProminence(
     preferredArtists.map((value) => foldForCreditEvidenceMatch(value)).filter((value) => value.length > 0)
   );
 
-  const scoreTrack = (track: Track, index: number): number => {
-    const foldedArtist = foldForCreditEvidenceMatch(track.artist);
-    if (!foldedArtist) return -index;
+  const artistTrackCounts = new Map<string, number>();
+  for (const track of tracks) {
+    const key = foldForCreditEvidenceMatch(track.artist);
+    if (!key) continue;
+    artistTrackCounts.set(key, (artistTrackCounts.get(key) || 0) + 1);
+  }
 
-    let score = 0;
+  const modeWeights: Record<PlaylistCurationMode, {
+    relevance: number;
+    prominence: number;
+    canonical: number;
+    signature: number;
+    diversity: number;
+  }> = {
+    essential: { relevance: 1.05, prominence: 1.45, canonical: 1.05, signature: 1.25, diversity: 0.5 },
+    balanced: { relevance: 1.1, prominence: 1.2, canonical: 1.0, signature: 1.0, diversity: 0.85 },
+    deep_cuts: { relevance: 1.15, prominence: 0.55, canonical: 0.9, signature: 0.95, diversity: 1.2 },
+  };
+  const weights = modeWeights[mode] || modeWeights.balanced;
+
+  const scoreTrack = (track: Track, index: number): {
+    final_score: number;
+    relevance_to_query: number;
+    prominence_score: number;
+    artist_canonical_score: number;
+    entity_signature_score: number;
+    diversity_adjustment: number;
+  } => {
+    const foldedArtist = foldForCreditEvidenceMatch(track.artist);
+    if (!foldedArtist) {
+      return {
+        final_score: -index,
+        relevance_to_query: 0,
+        prominence_score: 0,
+        artist_canonical_score: 0,
+        entity_signature_score: 0,
+        diversity_adjustment: 0,
+      };
+    }
+
+    let relevanceToQuery = 0;
+    let prominenceScore = 0;
+    let artistCanonicalScore = 0;
+    let entitySignatureScore = 0;
+    let diversityAdjustment = 0;
 
     if (preferredArtistKeys.has(foldedArtist)) {
-      score += 40;
+      relevanceToQuery += 40;
     }
 
     const truthProminence = truthArtistProminence.get(foldedArtist) || 0;
     if (truthProminence > 0) {
-      score += Math.min(180, truthProminence * 0.6);
+      prominenceScore += Math.min(180, truthProminence * 0.6);
+      artistCanonicalScore += 20;
     }
 
     const evidenceProminence = evidenceArtistProminence.get(foldedArtist) || 0;
     if (evidenceProminence > 0) {
-      score += Math.min(120, evidenceProminence * 12);
+      prominenceScore += Math.min(120, evidenceProminence * 12);
+      artistCanonicalScore += 15;
     }
 
     for (const work of preferredWorks) {
       if (foldForCreditEvidenceMatch(work.artist) !== foldedArtist) continue;
       if (!titlesLikelySameForCreditEvidence(track.song, work.song)) continue;
-      score += 90;
+      entitySignatureScore += 90;
     }
 
     for (const row of truthCandidates) {
       if (foldForCreditEvidenceMatch(row.artist) !== foldedArtist) continue;
       if (!titlesLikelySameForCreditEvidence(track.song, row.title)) continue;
-      score += 120 + Math.max(0, Math.min(100, row.confidence || 0));
+      relevanceToQuery += 65;
+      entitySignatureScore += 70;
+      prominenceScore += Math.max(0, Math.min(100, row.confidence || 0));
     }
 
     for (const row of evidenceCandidates) {
@@ -1918,23 +1995,70 @@ function rankVerifiedCreditTracksByProminence(
       const evidenceCount = typeof row.evidence_count === 'number' && Number.isFinite(row.evidence_count)
         ? Math.max(1, Math.floor(row.evidence_count))
         : 1;
-      score += 90 + Math.min(120, evidenceCount * 15);
+      relevanceToQuery += 60;
+      entitySignatureScore += 35;
+      prominenceScore += 90 + Math.min(120, evidenceCount * 15);
     }
 
-    if (score < 60) {
-      score -= 25;
+    const artistCount = artistTrackCounts.get(foldedArtist) || 1;
+    if (artistCount > 1) {
+      diversityAdjustment -= (artistCount - 1) * 10;
     }
 
-    return score - index * 0.001;
+    if (mode === 'deep_cuts') {
+      if (prominenceScore < 90) {
+        diversityAdjustment += 18;
+      } else if (prominenceScore > 180) {
+        diversityAdjustment -= 12;
+      }
+    }
+
+    if (mode === 'essential') {
+      if (prominenceScore > 140) {
+        prominenceScore += 25;
+      } else if (prominenceScore < 70) {
+        prominenceScore -= 15;
+      }
+    }
+
+    const finalScore = (
+      (relevanceToQuery * weights.relevance)
+      + (prominenceScore * weights.prominence)
+      + (artistCanonicalScore * weights.canonical)
+      + (entitySignatureScore * weights.signature)
+      + (diversityAdjustment * weights.diversity)
+    ) - index * 0.001;
+
+    return {
+      final_score: finalScore,
+      relevance_to_query: relevanceToQuery,
+      prominence_score: prominenceScore,
+      artist_canonical_score: artistCanonicalScore,
+      entity_signature_score: entitySignatureScore,
+      diversity_adjustment: diversityAdjustment,
+    };
   };
 
-  return tracks
-    .map((track, index) => ({ track, index, score: scoreTrack(track, index) }))
+  const scored = tracks
+    .map((track, index) => ({ track, index, components: scoreTrack(track, index) }))
     .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
+      if (b.components.final_score !== a.components.final_score) return b.components.final_score - a.components.final_score;
       return a.index - b.index;
-    })
-    .map((entry) => entry.track);
+    });
+
+  return {
+    tracks: scored.map((entry) => entry.track),
+    topScoreSample: scored.slice(0, 10).map((entry) => ({
+      artist: entry.track.artist,
+      song: entry.track.song,
+      final_score: Number(entry.components.final_score.toFixed(3)),
+      relevance_to_query: Number(entry.components.relevance_to_query.toFixed(3)),
+      prominence_score: Number(entry.components.prominence_score.toFixed(3)),
+      artist_canonical_score: Number(entry.components.artist_canonical_score.toFixed(3)),
+      entity_signature_score: Number(entry.components.entity_signature_score.toFixed(3)),
+      diversity_adjustment: Number(entry.components.diversity_adjustment.toFixed(3)),
+    })),
+  };
 }
 
 async function rerankVerifiedCreditTracksWithGemini(
@@ -2299,6 +2423,25 @@ function promptAllowsCreditVariants(prompt: string): boolean {
   const text = normalize(prompt);
   if (!text) return false;
   return /\bremix(?:es)?\b|\bmix(?:es)?\b|\brework(?:s)?\b|\bdub(?:s)?\b|\bedit(?:s)?\b|\bversion(?:s)?\b/.test(text);
+}
+
+function detectPlaylistCurationMode(prompt: string): { mode: PlaylistCurationMode; inferredFromPrompt: boolean } {
+  const text = normalize(prompt);
+  if (!text) {
+    return { mode: 'balanced', inferredFromPrompt: false };
+  }
+
+  const deepCutsIntent = /\bdeep\s*cuts?\b|\bunknown\b|\bobscure\b|\bunderrated\b|\bhidden\s*gems?\b|\bnon[-\s]?hits?\b|\bb[-\s]?sides?\b/.test(text);
+  if (deepCutsIntent) {
+    return { mode: 'deep_cuts', inferredFromPrompt: true };
+  }
+
+  const essentialIntent = /\bessential\b|\bdefinitive\b|\bbest\b|\bgreatest\b|\bmost\s+iconic\b|\bbest\s+known\b|\bsignature\b/.test(text);
+  if (essentialIntent) {
+    return { mode: 'essential', inferredFromPrompt: true };
+  }
+
+  return { mode: 'balanced', inferredFromPrompt: false };
 }
 
 function isVariantTrackTitle(title: string): boolean {
@@ -2724,12 +2867,14 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   console.log(`[Gemini] Translated prompt: "${translatedPrompt}"`);
 
   const routeDecision = resolvePromptRoute(translatedPrompt);
+  const curationMode = detectPlaylistCurationMode(translatedPrompt);
   const routeCreditSuffix = routeDecision.credit
     ? ` credit_role=${routeDecision.credit.role}${routeDecision.credit.name ? ` credit_name="${routeDecision.credit.name}"` : ''}`
     : '';
   console.log(
     `[routing] intent=${routeDecision.intent} mode=${routeDecision.mode} confidence=${routeDecision.confidence} reason_code=${routeDecision.reasonCode} reason="${routeDecision.reason}"${routeCreditSuffix}`
   );
+  console.log(`[curation] mode=${curationMode.mode} inferred=${curationMode.inferredFromPrompt}`);
   recordRoutingCall(routeDecision);
 
   const truth: TruthDetails = {};
@@ -3280,12 +3425,19 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
   if (constraint?.kind === 'credit' && verifiedTracks.length > 0) {
     verifiedTracks = preferCanonicalCreditTrackVersions(verifiedTracks, translatedPrompt, MIN_VERIFIED_TRACKS);
-    verifiedTracks = rankVerifiedCreditTracksByProminence(
+    const prominenceRanking = rankVerifiedCreditTracksByProminence(
       verifiedTracks,
       constraint,
       creditPreferredArtistsForCuration,
-      creditPreferredWorksForCuration
+      creditPreferredWorksForCuration,
+      curationMode.mode
     );
+    verifiedTracks = prominenceRanking.tracks;
+    truth.curation = {
+      mode: curationMode.mode,
+      inferred_from_prompt: curationMode.inferredFromPrompt,
+      top_score_sample: prominenceRanking.topScoreSample,
+    };
     verifiedTracks = await rerankVerifiedCreditTracksWithGemini(translatedPrompt, constraint, verifiedTracks);
     verifiedTracks = applyCreditOnlyArtistDiversity(translatedPrompt, verifiedTracks);
     verifiedTracks = refineCreditTrackReasons(verifiedTracks, constraint);

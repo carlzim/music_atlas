@@ -113,6 +113,7 @@ interface TruthDetails {
       selected_track_coverage: number;
       selection_retention_gap: number;
       selection_retention_coverage: number;
+      target_total_count: number;
       target_met_count: number;
       target_met_coverage: number;
       target_miss_count: number;
@@ -3771,13 +3772,15 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const uniqueDecadeTargetCoverage = uniqueDecadeTarget > 0
       ? Math.min(1, uniqueDecades.size / uniqueDecadeTarget)
       : 1;
+    const curationTargetKeys = ['size', 'retention', 'artist', 'decade'] as const;
+    const targetTotalCount = curationTargetKeys.length;
     const targetMissReasons: string[] = [];
     if (selectedTrackGap > 0) targetMissReasons.push('size');
     if (selectionRetentionGap > 0) targetMissReasons.push('retention');
     if (uniqueArtistTargetGap > 0) targetMissReasons.push('artist');
     if (uniqueDecadeTargetGap > 0) targetMissReasons.push('decade');
-    const targetMetCount = 4 - targetMissReasons.length;
-    const targetMetCoverage = targetMetCount / 4;
+    const targetMetCount = targetTotalCount - targetMissReasons.length;
+    const targetMetCoverage = targetTotalCount > 0 ? targetMetCount / targetTotalCount : 1;
 
     truth.curation = {
       mode: curationMode.mode,
@@ -3803,6 +3806,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         selected_track_coverage: selectedTrackCoverage,
         selection_retention_gap: selectionRetentionGap,
         selection_retention_coverage: selectionRetentionCoverage,
+        target_total_count: targetTotalCount,
         target_met_count: targetMetCount,
         target_met_coverage: targetMetCoverage,
         target_miss_count: targetMissReasons.length,

@@ -1,4 +1,5 @@
 import {
+  detectPlaylistCurationModeForEval,
   detectCreditPromptForEval,
   extractPlaceEntityFromPromptForEval,
   parsePlaylistResponseForEval,
@@ -843,6 +844,54 @@ function runArtistFieldSwedishOchSplitCase(): ParserCaseResult {
   }
 }
 
+function runCurationModeBalancedDefaultCase(): ParserCaseResult {
+  const id = 'curation_mode_balanced_default';
+  const prompt = 'Songs produced by Barry Gordy';
+  const mode = detectPlaylistCurationModeForEval(prompt);
+  const pass = mode.mode === 'balanced' && mode.inferredFromPrompt === false;
+  return {
+    id,
+    pass,
+    details: `mode=${mode.mode} inferred=${mode.inferredFromPrompt}`,
+  };
+}
+
+function runCurationModeEssentialIntentCase(): ParserCaseResult {
+  const id = 'curation_mode_essential_intent';
+  const prompt = 'The best and most iconic songs produced by Barry Gordy';
+  const mode = detectPlaylistCurationModeForEval(prompt);
+  const pass = mode.mode === 'essential' && mode.inferredFromPrompt === true;
+  return {
+    id,
+    pass,
+    details: `mode=${mode.mode} inferred=${mode.inferredFromPrompt}`,
+  };
+}
+
+function runCurationModeDeepCutsIntentCase(): ParserCaseResult {
+  const id = 'curation_mode_deep_cuts_intent';
+  const prompt = 'Unknown obscure deep cuts produced by Barry Gordy';
+  const mode = detectPlaylistCurationModeForEval(prompt);
+  const pass = mode.mode === 'deep_cuts' && mode.inferredFromPrompt === true;
+  return {
+    id,
+    pass,
+    details: `mode=${mode.mode} inferred=${mode.inferredFromPrompt}`,
+  };
+}
+
+function runCurationModeConflictPrefersDeepCutsCase(): ParserCaseResult {
+  const id = 'curation_mode_conflict_prefers_deep_cuts';
+  const prompt = 'Best unknown deep cuts produced by Barry Gordy';
+  const mode = detectPlaylistCurationModeForEval(prompt);
+  const pass = mode.mode === 'deep_cuts' && mode.inferredFromPrompt === true;
+  return {
+    id,
+    pass,
+    details: `mode=${mode.mode} inferred=${mode.inferredFromPrompt}`,
+  };
+}
+
 function run(): void {
   const strict = process.argv.includes('--strict');
   const results: ParserCaseResult[] = [
@@ -892,6 +941,10 @@ function run(): void {
     runJsonParseRepairCase(),
     runArtistFieldFeaturingSplitCase(),
     runArtistFieldSwedishOchSplitCase(),
+    runCurationModeBalancedDefaultCase(),
+    runCurationModeEssentialIntentCase(),
+    runCurationModeDeepCutsIntentCase(),
+    runCurationModeConflictPrefersDeepCutsCase(),
     runSongTitleFeaturingExtractCase(),
     runSongTitleDuetExtractCase(),
     runFullArtistNamePreservedCase(),

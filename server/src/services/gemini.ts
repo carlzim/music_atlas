@@ -3922,3 +3922,7 @@ function parsePlaylistResponse(text: string): Playlist {
 export function parsePlaylistResponseForEval(text: string): Playlist {
   return parsePlaylistResponse(text);
 }
+
+export function detectPlaylistCurationModeForEval(prompt: string): { mode: PlaylistCurationMode; inferredFromPrompt: boolean } {
+  return detectPlaylistCurationMode(prompt);
+}

@@ -111,10 +111,12 @@ interface TruthDetails {
       unique_artist_target: number;
       unique_artist_target_met: boolean;
       unique_artist_target_gap: number;
+      unique_artist_target_coverage: number;
       unique_decades: number;
       unique_decade_target: number;
       unique_decade_target_met: boolean;
       unique_decade_target_gap: number;
+      unique_decade_target_coverage: number;
       max_tracks_per_artist: number;
     };
   };
@@ -3744,6 +3746,12 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const uniqueDecadeTarget = getModeUniqueDecadeTarget(curationMode.mode, composedCreditTracks.length);
     const uniqueArtistTargetGap = Math.max(0, uniqueArtistTarget - uniqueArtists);
     const uniqueDecadeTargetGap = Math.max(0, uniqueDecadeTarget - uniqueDecades.size);
+    const uniqueArtistTargetCoverage = uniqueArtistTarget > 0
+      ? Math.min(1, uniqueArtists / uniqueArtistTarget)
+      : 1;
+    const uniqueDecadeTargetCoverage = uniqueDecadeTarget > 0
+      ? Math.min(1, uniqueDecades.size / uniqueDecadeTarget)
+      : 1;
 
     truth.curation = {
       mode: curationMode.mode,
@@ -3767,10 +3775,12 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         unique_artist_target: uniqueArtistTarget,
         unique_artist_target_met: uniqueArtistTargetGap === 0,
         unique_artist_target_gap: uniqueArtistTargetGap,
+        unique_artist_target_coverage: uniqueArtistTargetCoverage,
         unique_decades: uniqueDecades.size,
         unique_decade_target: uniqueDecadeTarget,
         unique_decade_target_met: uniqueDecadeTargetGap === 0,
         unique_decade_target_gap: uniqueDecadeTargetGap,
+        unique_decade_target_coverage: uniqueDecadeTargetCoverage,
         max_tracks_per_artist: getMaxTracksPerArtist(composedCreditTracks),
       },
     };

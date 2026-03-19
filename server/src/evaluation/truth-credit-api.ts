@@ -38,6 +38,7 @@ async function runTruthCreditApiCase(params: {
   minimumTracks?: number;
   expectNoVariants?: boolean;
   expectVariantWhenAvailable?: boolean;
+  expectedCurationMode?: 'essential' | 'balanced' | 'deep_cuts';
 }): Promise<TruthCreditApiCaseResult> {
   const { id, creditName, creditRole, prompt } = params;
 
@@ -75,6 +76,15 @@ async function runTruthCreditApiCase(params: {
   const balancedEnough = maxPerArtist <= 4 && maxPerAlbumProxy <= 4;
   const variantTracks = tracks.filter((track) => isVariantTitle(track.song));
   const candidateVariantCount = combinedCandidates.filter((candidate) => isVariantTitle(candidate.title)).length;
+  const curationMode = response.truth?.curation?.mode;
+  const curationModePass = params.expectedCurationMode
+    ? curationMode === params.expectedCurationMode
+    : true;
+  const curationUniqueArtists = response.truth?.curation?.composition?.unique_artists ?? null;
+  const curationUniqueDecades = response.truth?.curation?.composition?.unique_decades ?? null;
+  const curationTopSampleSize = Array.isArray(response.truth?.curation?.top_score_sample)
+    ? response.truth!.curation!.top_score_sample!.length
+    : 0;
 
   let variantExpectationPass = true;
   if (params.expectNoVariants) {
@@ -87,12 +97,13 @@ async function runTruthCreditApiCase(params: {
     && respectsTrackCap
     && noOutsideEvidence
     && balancedEnough
-    && variantExpectationPass;
+    && variantExpectationPass
+    && curationModePass;
 
   return {
     id,
     pass,
-    details: `tracks=${tracks.length} outside_evidence=${tracksOutsideEvidence.length} max_per_artist=${maxPerArtist} max_per_album_proxy=${maxPerAlbumProxy} variants=${variantTracks.length} variant_candidates=${candidateVariantCount} truth_attempted=${truthSync.attempted} truth_imported=${truthSync.imported} evidence_candidates=${combinedCandidates.length} used_auto_backfill=${response.verification?.used_auto_backfill === true}`,
+    details: `tracks=${tracks.length} outside_evidence=${tracksOutsideEvidence.length} max_per_artist=${maxPerArtist} max_per_album_proxy=${maxPerAlbumProxy} variants=${variantTracks.length} variant_candidates=${candidateVariantCount} curation_mode=${curationMode || 'none'} expected_mode=${params.expectedCurationMode || 'any'} curation_unique_artists=${curationUniqueArtists ?? 'n/a'} curation_unique_decades=${curationUniqueDecades ?? 'n/a'} curation_top_sample=${curationTopSampleSize} truth_attempted=${truthSync.attempted} truth_imported=${truthSync.imported} evidence_candidates=${combinedCandidates.length} used_auto_backfill=${response.verification?.used_auto_backfill === true}`,
   };
 }
 
@@ -103,6 +114,29 @@ async function runProducerApiCase(): Promise<TruthCreditApiCaseResult> {
     creditRole: 'producer',
     prompt: 'Songs produced by Brian Eno',
     expectNoVariants: true,
+    expectedCurationMode: 'balanced',
+  });
+}
+
+async function runProducerEssentialApiCase(): Promise<TruthCreditApiCaseResult> {
+  return runTruthCreditApiCase({
+    id: 'truth_credit_api_producer_essential_mode_detected',
+    creditName: 'Brian Eno',
+    creditRole: 'producer',
+    prompt: 'The best and most iconic songs produced by Brian Eno',
+    expectNoVariants: true,
+    expectedCurationMode: 'essential',
+  });
+}
+
+async function runProducerDeepCutsApiCase(): Promise<TruthCreditApiCaseResult> {
+  return runTruthCreditApiCase({
+    id: 'truth_credit_api_producer_deep_cuts_mode_detected',
+    creditName: 'Brian Eno',
+    creditRole: 'producer',
+    prompt: 'Unknown obscure deep cuts produced by Brian Eno',
+    minimumTracks: 5,
+    expectedCurationMode: 'deep_cuts',
   });
 }
 
@@ -146,6 +180,8 @@ async function run(): Promise<void> {
 
   const results: TruthCreditApiCaseResult[] = [
     await runProducerApiCase(),
+    await runProducerEssentialApiCase(),
+    await runProducerDeepCutsApiCase(),
     await runProducerRemixApiCase(),
     await runEngineerApiCase(),
     await runArrangerApiCase(),

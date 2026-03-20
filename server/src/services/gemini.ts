@@ -123,6 +123,7 @@ interface TruthDetails {
       target_reason_partition_ok: boolean;
       target_reason_overlap_count: number;
       target_reason_overlap_coverage: number;
+      target_reason_overlap_gap: number;
       target_reason_union_count: number;
       target_reason_union_gap: number;
       target_reason_union_coverage: number;
@@ -3799,6 +3800,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const targetReasonOverlapCoverage = targetTotalCount > 0
       ? Math.min(1, targetReasonOverlapCount / targetTotalCount)
       : 0;
+    const targetReasonOverlapGap = Math.max(0, targetTotalCount - targetReasonOverlapCount);
     const targetReasonUnionCount = new Set<string>([...targetMetReasons, ...targetMissReasons]).size;
     const targetReasonUnionGap = Math.max(0, targetTotalCount - targetReasonUnionCount);
     const targetReasonUnionCoverage = targetTotalCount > 0
@@ -3841,6 +3843,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         target_reason_partition_ok: targetReasonPartitionOk,
         target_reason_overlap_count: targetReasonOverlapCount,
         target_reason_overlap_coverage: targetReasonOverlapCoverage,
+        target_reason_overlap_gap: targetReasonOverlapGap,
         target_reason_union_count: targetReasonUnionCount,
         target_reason_union_gap: targetReasonUnionGap,
         target_reason_union_coverage: targetReasonUnionCoverage,

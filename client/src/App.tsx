@@ -139,6 +139,7 @@ interface TruthSummary {
       target_reason_union_gap?: number;
       target_reason_union_coverage?: number;
       target_reason_balance_index?: number;
+      target_reason_error_count?: number;
       target_reason_error_coverage?: number;
       target_reason_quality_index?: number;
       target_reason_quality_error_complement_ok?: boolean;
@@ -888,6 +889,9 @@ function HomePage() {
               : ''}
             {truthSummary.curation?.composition
               ? `, reason error ${typeof truthSummary.curation.composition.target_reason_error_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.target_reason_error_coverage * 100)}%` : 'n/a'}`
+              : ''}
+            {truthSummary.curation?.composition
+              ? `, reason error count ${truthSummary.curation.composition.target_reason_error_count ?? 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
               ? `, reason quality ${typeof truthSummary.curation.composition.target_reason_quality_index === 'number' ? `${Math.round(truthSummary.curation.composition.target_reason_quality_index * 100)}%` : 'n/a'}`

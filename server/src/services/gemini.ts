@@ -130,6 +130,7 @@ interface TruthDetails {
       target_reason_balance_index: number;
       target_reason_error_coverage: number;
       target_reason_quality_index: number;
+      target_reason_quality_error_complement_ok: boolean;
       target_size_met: boolean;
       target_retention_met: boolean;
       target_artist_met: boolean;
@@ -3814,6 +3815,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       ? Math.min(1, (targetReasonOverlapCount + targetReasonUnionGap) / targetTotalCount)
       : 0;
     const targetReasonQualityIndex = Math.max(0, 1 - targetReasonErrorCoverage);
+    const targetReasonQualityErrorComplementOk = Math.abs((targetReasonQualityIndex + targetReasonErrorCoverage) - 1) < 1e-9;
     const targetReasonPartitionOk = targetMetReasons.length + targetMissReasons.length === targetTotalCount
       && targetReasonOverlapCount === 0;
 
@@ -3858,6 +3860,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         target_reason_balance_index: targetReasonBalanceIndex,
         target_reason_error_coverage: targetReasonErrorCoverage,
         target_reason_quality_index: targetReasonQualityIndex,
+        target_reason_quality_error_complement_ok: targetReasonQualityErrorComplementOk,
         target_size_met: selectedTrackGap === 0,
         target_retention_met: selectionRetentionGap === 0,
         target_artist_met: uniqueArtistTargetGap === 0,

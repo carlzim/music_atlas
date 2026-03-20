@@ -133,6 +133,7 @@ interface TruthSummary {
       target_consistency_ok?: boolean;
       target_reason_partition_ok?: boolean;
       target_reason_overlap_count?: number;
+      target_reason_overlap_coverage?: number;
       target_reason_union_count?: number;
       target_reason_union_gap?: number;
       target_reason_union_coverage?: number;
@@ -861,6 +862,9 @@ function HomePage() {
               : ''}
             {truthSummary.curation?.composition
               ? `, reason overlap ${truthSummary.curation.composition.target_reason_overlap_count ?? 'n/a'}`
+              : ''}
+            {truthSummary.curation?.composition
+              ? `, reason overlap coverage ${typeof truthSummary.curation.composition.target_reason_overlap_coverage === 'number' ? `${Math.round(truthSummary.curation.composition.target_reason_overlap_coverage * 100)}%` : 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
               ? `, reason union ${truthSummary.curation.composition.target_reason_union_count ?? 'n/a'}`

@@ -135,6 +135,7 @@ interface TruthDetails {
       target_reason_quality_error_complement_ok: boolean;
       target_reason_integrity_ok: boolean;
       target_reason_integrity_score: number;
+      target_reason_integrity_gap: number;
       target_size_met: boolean;
       target_retention_met: boolean;
       target_artist_met: boolean;
@@ -3833,6 +3834,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       targetReasonQualityErrorComplementOk,
     ];
     const targetReasonIntegrityScore = targetReasonIntegrityChecks.filter(Boolean).length / targetReasonIntegrityChecks.length;
+    const targetReasonIntegrityGap = targetReasonIntegrityChecks.length - targetReasonIntegrityChecks.filter(Boolean).length;
 
     truth.curation = {
       mode: curationMode.mode,
@@ -3880,6 +3882,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         target_reason_quality_error_complement_ok: targetReasonQualityErrorComplementOk,
         target_reason_integrity_ok: targetReasonIntegrityOk,
         target_reason_integrity_score: targetReasonIntegrityScore,
+        target_reason_integrity_gap: targetReasonIntegrityGap,
         target_size_met: selectedTrackGap === 0,
         target_retention_met: selectionRetentionGap === 0,
         target_artist_met: uniqueArtistTargetGap === 0,

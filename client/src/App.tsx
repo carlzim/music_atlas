@@ -146,6 +146,7 @@ interface TruthSummary {
       target_reason_quality_error_complement_ok?: boolean;
       target_reason_integrity_ok?: boolean;
       target_reason_integrity_total_count?: number;
+      target_reason_integrity_passed_count?: number;
       target_reason_integrity_score?: number;
       target_reason_integrity_gap?: number;
       target_size_met?: boolean;
@@ -915,6 +916,9 @@ function HomePage() {
               : ''}
             {truthSummary.curation?.composition
               ? `, reason integrity total ${truthSummary.curation.composition.target_reason_integrity_total_count ?? 'n/a'}`
+              : ''}
+            {truthSummary.curation?.composition
+              ? `, reason integrity passed ${truthSummary.curation.composition.target_reason_integrity_passed_count ?? 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
               ? `, reason integrity gap ${truthSummary.curation.composition.target_reason_integrity_gap ?? 'n/a'}`

@@ -135,6 +135,7 @@ interface TruthDetails {
       target_reason_quality_error_complement_ok: boolean;
       target_reason_integrity_ok: boolean;
       target_reason_integrity_total_count: number;
+      target_reason_integrity_passed_count: number;
       target_reason_integrity_score: number;
       target_reason_integrity_gap: number;
       target_size_met: boolean;
@@ -3887,6 +3888,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         target_reason_quality_error_complement_ok: targetReasonQualityErrorComplementOk,
         target_reason_integrity_ok: targetReasonIntegrityOk,
         target_reason_integrity_total_count: targetReasonIntegrityTotalCount,
+        target_reason_integrity_passed_count: targetReasonIntegrityPassedCount,
         target_reason_integrity_score: targetReasonIntegrityScore,
         target_reason_integrity_gap: targetReasonIntegrityGap,
         target_size_met: selectedTrackGap === 0,

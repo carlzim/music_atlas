@@ -916,10 +916,7 @@ function HomePage() {
               ? `, reason integrity score ${typeof truthSummary.curation.composition.target_reason_integrity_score === 'number' ? `${Math.round(truthSummary.curation.composition.target_reason_integrity_score * 100)}%` : 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
-              ? `, reason integrity total ${truthSummary.curation.composition.target_reason_integrity_total_count ?? 'n/a'}`
-              : ''}
-            {truthSummary.curation?.composition
-              ? `, reason integrity passed ${truthSummary.curation.composition.target_reason_integrity_passed_count ?? 'n/a'}`
+              ? `, reason integrity passed ${truthSummary.curation.composition.target_reason_integrity_passed_count ?? 'n/a'}/${truthSummary.curation.composition.target_reason_integrity_total_count ?? 'n/a'}`
               : ''}
             {truthSummary.curation?.composition
               ? `, reason integrity gap ${truthSummary.curation.composition.target_reason_integrity_gap ?? 'n/a'}`

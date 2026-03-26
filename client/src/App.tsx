@@ -254,10 +254,12 @@ function humanizeStudioBackfillSkipReason(reason: string): string {
   if (!trimmed) return 'Studio backfill was skipped.';
   if (trimmed === 'disabled') return 'Studio backfill is disabled by server configuration.';
   if (trimmed === 'cooldown_active') return 'Studio backfill cooldown is active. Try again shortly.';
+  if (trimmed === 'timeout') return 'Studio backfill timed out. Try again or use a narrower studio prompt.';
   if (trimmed === 'missing_studio_name') return 'Studio name could not be inferred from the prompt.';
   if (trimmed === 'missing_discogs_token') return 'Discogs is not configured on the server.';
   if (trimmed === 'studio_discogs_label_missing') return 'No Discogs studio mapping is configured for this studio identity yet.';
   if (trimmed === 'no_rows') return 'Discogs backfill ran but found no matching recording rows yet.';
+  if (trimmed.startsWith('error:')) return `Studio backfill failed: ${trimmed.slice(6)}`;
   return `Studio backfill skipped: ${trimmed}`;
 }
 

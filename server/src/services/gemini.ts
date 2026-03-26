@@ -200,11 +200,32 @@ const AUTO_BACKFILL_COOLDOWN_MS = Math.max(
     ? Number(process.env.MUSICBRAINZ_AUTO_BACKFILL_COOLDOWN_MS || '600000')
     : 600000
 );
+const STUDIO_AUTO_BACKFILL_TIMEOUT_MS = Math.max(
+  1000,
+  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '12000'))
+    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '12000')
+    : 12000
+);
 const lastAutoBackfillByCredit = new Map<string, number>();
 const lastAutoBackfillByStudio = new Map<string, number>();
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runWithTimeout<T>(operation: () => Promise<T>, timeoutMs: number, timeoutCode: string): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(timeoutCode)), timeoutMs);
+    operation()
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 function isRetryableGeminiError(error: unknown): boolean {
@@ -3912,40 +3933,60 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           };
           console.log(`[truth] studio sync skipped reason=${studioBackfillWindow.reason || 'cooldown_active'}`);
         } else {
-          const studioBackfillResult = await backfillStudioFromDiscogs({
-            studioName,
-            prompt: translatedPrompt,
-            limit: 80,
-          });
-          truth.studio_sync = {
-            studio: studioBackfillResult.studioName,
-            source: 'discogs',
-            attempted: studioBackfillResult.attempted,
-            imported: studioBackfillResult.imported,
-            inserted_evidence: studioBackfillResult.insertedEvidence,
-            skipped_reason: studioBackfillResult.skippedReason,
-          };
+          try {
+            const studioBackfillResult = await runWithTimeout(
+              () => backfillStudioFromDiscogs({
+                studioName,
+                prompt: translatedPrompt,
+                limit: 80,
+              }),
+              STUDIO_AUTO_BACKFILL_TIMEOUT_MS,
+              'studio_backfill_timeout'
+            );
+            truth.studio_sync = {
+              studio: studioBackfillResult.studioName,
+              source: 'discogs',
+              attempted: studioBackfillResult.attempted,
+              imported: studioBackfillResult.imported,
+              inserted_evidence: studioBackfillResult.insertedEvidence,
+              skipped_reason: studioBackfillResult.skippedReason,
+            };
 
-          if (studioBackfillResult.attempted) {
-            recordRoutingBackfill('discogs', studioBackfillResult.insertedEvidence > 0);
-          }
-          console.log(
-            `[truth] studio sync studio="${studioBackfillResult.studioName}" imported=${studioBackfillResult.imported} inserted=${studioBackfillResult.insertedEvidence}${studioBackfillResult.skippedReason ? ` reason=${studioBackfillResult.skippedReason}` : ''}`
-          );
+            if (studioBackfillResult.attempted) {
+              recordRoutingBackfill('discogs', studioBackfillResult.insertedEvidence > 0);
+            }
+            console.log(
+              `[truth] studio sync studio="${studioBackfillResult.studioName}" imported=${studioBackfillResult.imported} inserted=${studioBackfillResult.insertedEvidence}${studioBackfillResult.skippedReason ? ` reason=${studioBackfillResult.skippedReason}` : ''}`
+            );
 
-          if (studioBackfillResult.insertedEvidence > 0 || studioBackfillResult.imported > 0) {
-            const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
-              ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
-              : [studioBackfillResult.studioName];
-            const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 140))
-              .map((row) => ({
-                artist: row.artist,
-                song: row.title,
-                reason: `Verified recording studio evidence for ${studioBackfillResult.studioName}`,
-              }));
+            if (studioBackfillResult.insertedEvidence > 0 || studioBackfillResult.imported > 0) {
+              const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+                ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+                : [studioBackfillResult.studioName];
+              const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 140))
+                .map((row) => ({
+                  artist: row.artist,
+                  song: row.title,
+                  reason: `Verified recording studio evidence for ${studioBackfillResult.studioName}`,
+                }));
 
-            candidateTracks = dedupeTracks([...studioSeedTracks, ...candidateTracks]);
-            verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
+              candidateTracks = dedupeTracks([...studioSeedTracks, ...candidateTracks]);
+              verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            const skippedReason = message === 'studio_backfill_timeout'
+              ? 'timeout'
+              : `error:${message.slice(0, 120)}`;
+            truth.studio_sync = {
+              studio: studioName,
+              source: 'discogs',
+              attempted: false,
+              imported: 0,
+              inserted_evidence: 0,
+              skipped_reason: skippedReason,
+            };
+            console.log(`[truth] studio sync skipped reason=${skippedReason}`);
           }
         }
       } else {

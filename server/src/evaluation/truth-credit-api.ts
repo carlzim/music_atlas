@@ -143,6 +143,7 @@ async function runTruthCreditApiCase(params: {
   const curationTargetReasonIntegrityGap = response.truth?.curation?.composition?.target_reason_integrity_gap ?? null;
   const curationTargetReasonIntegrityConsistencyOk = response.truth?.curation?.composition?.target_reason_integrity_consistency_ok ?? null;
   const curationTargetReasonIntegrityMissReasons = response.truth?.curation?.composition?.target_reason_integrity_miss_reasons ?? null;
+  const curationTargetReasonIntegrityMissCount = response.truth?.curation?.composition?.target_reason_integrity_miss_count ?? null;
   const curationTargetSizeMet = response.truth?.curation?.composition?.target_size_met ?? null;
   const curationTargetRetentionMet = response.truth?.curation?.composition?.target_retention_met ?? null;
   const curationTargetArtistMet = response.truth?.curation?.composition?.target_artist_met ?? null;
@@ -314,6 +315,9 @@ async function runTruthCreditApiCase(params: {
   if (!expectedTargetReasonQualityErrorComplementOk) expectedTargetReasonIntegrityMissReasons.push('quality_error_complement');
   const targetReasonIntegrityMissReasonsPass =
     sameStringList(curationTargetReasonIntegrityMissReasons, expectedTargetReasonIntegrityMissReasons);
+  const expectedTargetReasonIntegrityMissCount = expectedTargetReasonIntegrityMissReasons.length;
+  const targetReasonIntegrityMissCountPass =
+    curationTargetReasonIntegrityMissCount === expectedTargetReasonIntegrityMissCount;
   const targetReasonPartitionPass = curationTargetReasonPartitionOk === expectedTargetReasonPartitionOk;
   const targetSizeMetPass = curationTargetSizeMet === (expectedSelectedTrackGap === 0);
   const targetRetentionMetPass = curationTargetRetentionMet === ((expectedSelectionRetentionGap ?? 0) === 0);
@@ -372,6 +376,7 @@ async function runTruthCreditApiCase(params: {
     && targetReasonIntegrityGapPass
     && targetReasonIntegrityConsistencyPass
     && targetReasonIntegrityMissReasonsPass
+    && targetReasonIntegrityMissCountPass
     && targetReasonPartitionPass
     && targetSizeMetPass
     && targetRetentionMetPass

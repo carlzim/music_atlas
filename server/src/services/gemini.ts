@@ -547,7 +547,14 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
     const trimmed = value.trim();
     if (!trimmed) return '';
 
-    const studioWithLocation = trimmed.match(/^(.+?\b(?:studio|studios|studion|studior|studiorna)\b)\s+(?:in|i)\s+(.+)$/i);
+    const withoutTemporalSuffix = trimmed
+      .replace(/\s+(?:in|during|from|at)\s+the\s+\d{2}(?:['’]s|s)\b.*$/i, '')
+      .replace(/\s+(?:in|during|from|at)\s+\d{4}\b.*$/i, '')
+      .replace(/\s+p[aå]\s+\d{2}-talet\b.*$/i, '')
+      .trim();
+    if (!withoutTemporalSuffix) return '';
+
+    const studioWithLocation = withoutTemporalSuffix.match(/^(.+?\b(?:studio|studios|studion|studior|studiorna)\b)\s+(?:in|i)\s+(.+)$/i);
     if (studioWithLocation) {
       const studioPart = (studioWithLocation[1] || '').trim();
       const locationPart = (studioWithLocation[2] || '').trim();
@@ -564,7 +571,7 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
       }
     }
 
-    return trimmed;
+    return withoutTemporalSuffix;
   };
 
   const patterns = [
@@ -957,7 +964,7 @@ function sanitizeLocationMetadata(input: {
     .filter((v) => !/\d/.test(v));
 
   const studios = input.studios
-    .map((v) => v.trim())
+    .map((v) => sanitizeStudioLabel(v))
     .filter((v) => v.length > 0)
     .filter((v) => /\b(studio|studios|studion|studior|studiorna|recorders|recording)\b/i.test(v))
     .filter((v) => !companyLike.test(v))
@@ -1494,20 +1501,49 @@ function summarizeStudioConstraintDiagnostics(
 }
 
 function hasStudioIntent(prompt: string): boolean {
-  return /\bstudio\b|\bstudios\b|\brecorded at\b|\brecorded in\b|\btracked at\b|\btracked in\b|\bcut at\b|\bcut in\b|\bmade at\b|\bmade in\b|\bdone at\b|\bdone in\b/.test(normalize(prompt));
+  return /\b(?:studio|studios|studion|studior|studiorna)\b|\brecorded at\b|\brecorded in\b|\btracked at\b|\btracked in\b|\bcut at\b|\bcut in\b|\bmade at\b|\bmade in\b|\bdone at\b|\bdone in\b/.test(normalize(prompt));
+}
+
+function sanitizeStudioLabel(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+
+  return trimmed
+    .replace(/\s+(?:in|during|from|at)\s+the\s+\d{2}(?:['’]s|s)\b.*$/i, '')
+    .replace(/\s+(?:in|during|from|at)\s+\d{4}\b.*$/i, '')
+    .replace(/\s+p[aå]\s+\d{2}-talet\b.*$/i, '')
+    .trim();
+}
+
+function studioLabelQualityScore(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) return -100;
+
+  let score = 0;
+  if (/\bStudios?\b|\bStudio\b/.test(trimmed)) score += 3;
+  if (/\b(?:in|during|from|at)\s+the\s+\d{2}(?:['’]s|s)\b/i.test(trimmed)) score -= 4;
+  if (/\b(?:in|during|from|at)\s+\d{4}\b/i.test(trimmed)) score -= 4;
+  if (/\bp[aå]\s+\d{2}-talet\b/i.test(trimmed)) score -= 4;
+  score -= Math.max(0, trimmed.split(/\s+/).length - 4);
+
+  return score;
 }
 
 function dedupeStudiosByCanonical(studios: string[]): string[] {
   const deduped = new Map<string, string>();
   for (const raw of studios) {
-    const studio = raw.trim();
+    const studio = sanitizeStudioLabel(raw);
     if (!studio) continue;
     const canonical = buildStudioCanonicalKey(studio);
     if (!canonical) continue;
 
     const existing = deduped.get(canonical);
     if (existing) {
-      deduped.set(canonical, studio.length > existing.length ? studio : existing);
+      const existingScore = studioLabelQualityScore(existing);
+      const incomingScore = studioLabelQualityScore(studio);
+      if (incomingScore > existingScore) {
+        deduped.set(canonical, studio);
+      }
     } else {
       deduped.set(canonical, studio);
     }

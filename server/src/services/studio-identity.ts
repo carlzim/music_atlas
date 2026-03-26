@@ -5,6 +5,7 @@ export interface StudioIdentity {
   primaryName: string;
   aliases: string[];
   successorNames: string[];
+  discogsLabelId?: number;
 }
 
 const STUDIO_IDENTITIES: StudioIdentity[] = [
@@ -28,6 +29,7 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
       'Kaza Studios',
       'IMRSV Studios, Stockholm',
     ],
+    discogsLabelId: 270404,
   },
   {
     key: 'air_studios_london',
@@ -39,6 +41,7 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
       'AIR Studios',
     ],
     successorNames: [],
+    discogsLabelId: 29092,
   },
   {
     key: 'gold_star_studios_los_angeles',
@@ -50,6 +53,7 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
       'Gold Star',
     ],
     successorNames: [],
+    discogsLabelId: 263247,
   },
 ];
 
@@ -112,6 +116,7 @@ export interface ResolvedStudioIdentity {
   primaryName: string;
   acceptedStudioNames: string[];
   excludedSuccessorNames: string[];
+  discogsLabelId?: number;
 }
 
 function toResolvedStudioIdentity(compiled: CompiledStudioIdentity): ResolvedStudioIdentity {
@@ -120,6 +125,7 @@ function toResolvedStudioIdentity(compiled: CompiledStudioIdentity): ResolvedStu
     primaryName: compiled.identity.primaryName,
     acceptedStudioNames: [compiled.identity.primaryName, ...compiled.identity.aliases],
     excludedSuccessorNames: [...compiled.identity.successorNames],
+    discogsLabelId: compiled.identity.discogsLabelId,
   };
 }
 

@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { canonicalizeEquipmentName, getAtlasEntityCatalog, getAssociatedArtistsByNode, getBandMembers, getCreditAtlas, getGraphNeighbors, getKnownTags, getPlaylistByCacheKey, getTracksByRecordingCreditEvidence, hasRecordingCreditEvidence, hasRecordingStudioEvidence, isGenericEquipmentName, normalizePromptForCache, saveArtistMembershipEvidence, savePlaylist } from './db.js';
+import { canonicalizeEquipmentName, getAtlasEntityCatalog, getAssociatedArtistsByNode, getBandMembers, getCreditAtlas, getGraphNeighbors, getKnownTags, getPlaylistByCacheKey, getTracksByRecordingCreditEvidence, getTracksByRecordingStudioEvidence, hasRecordingCreditEvidence, hasRecordingStudioEvidence, isGenericEquipmentName, normalizePromptForCache, saveArtistMembershipEvidence, savePlaylist } from './db.js';
 import { backfillCreditFromMusicBrainz, SUPPORTED_MUSICBRAINZ_CREDIT_ROLES } from './evidence-backfill.js';
+import { backfillStudioFromDiscogs } from './evidence-backfill-studio.js';
 import { buildArtistCanonicalKey, buildCreditCanonicalKey, buildPersonCanonicalKey, buildStudioCanonicalKey, canonicalizeDisplayName } from './normalize.js';
 import { searchTrackWithDiagnostics } from './spotify.js';
 import { syncTruthMembershipForBandName } from './truth-layer.js';
@@ -79,6 +80,14 @@ interface TruthDetails {
     source: 'discogs';
     attempted: boolean;
     imported: number;
+    skipped_reason?: string;
+  };
+  studio_sync?: {
+    studio: string;
+    source: 'discogs';
+    attempted: boolean;
+    imported: number;
+    inserted_evidence: number;
     skipped_reason?: string;
   };
   curation?: {
@@ -182,6 +191,7 @@ const AUTO_BACKFILL_COOLDOWN_MS = Math.max(
     : 600000
 );
 const lastAutoBackfillByCredit = new Map<string, number>();
+const lastAutoBackfillByStudio = new Map<string, number>();
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1396,6 +1406,23 @@ function shouldAttemptAutoBackfill(creditName: string, creditRole: string): { al
   }
 
   lastAutoBackfillByCredit.set(key, now);
+  return { allowed: true };
+}
+
+function shouldAttemptStudioAutoBackfill(studioName: string, studioIdentityKey?: string): { allowed: boolean; reason?: string } {
+  const namePart = studioIdentityKey || normalize(studioName);
+  if (!namePart) {
+    return { allowed: false, reason: 'invalid_studio' };
+  }
+  const key = `studio::${namePart}`;
+  const now = Date.now();
+  const last = lastAutoBackfillByStudio.get(key) || 0;
+
+  if (last > 0 && now - last < AUTO_BACKFILL_COOLDOWN_MS) {
+    return { allowed: false, reason: 'cooldown_active' };
+  }
+
+  lastAutoBackfillByStudio.set(key, now);
   return { allowed: true };
 }
 
@@ -3668,6 +3695,72 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         verification.backfill_skipped_reason = canUseTruthCredit
           ? 'discogs_insufficient_evidence'
           : 'unsupported_role';
+      }
+    }
+  }
+
+  if (constraint?.kind === 'studio' && verifiedTracks.length < MIN_VERIFIED_TRACKS) {
+    const studioName = (constraint.value || '').trim();
+    if (studioName) {
+      const studioBackfillEnabled = process.env.ENABLE_STUDIO_DISCOGS_BACKFILL !== 'false';
+      if (studioBackfillEnabled) {
+        const studioBackfillWindow = shouldAttemptStudioAutoBackfill(studioName, constraint.studioIdentityKey);
+        if (!studioBackfillWindow.allowed) {
+          truth.studio_sync = {
+            studio: studioName,
+            source: 'discogs',
+            attempted: false,
+            imported: 0,
+            inserted_evidence: 0,
+            skipped_reason: studioBackfillWindow.reason || 'cooldown_active',
+          };
+          console.log(`[truth] studio sync skipped reason=${studioBackfillWindow.reason || 'cooldown_active'}`);
+        } else {
+          const studioBackfillResult = await backfillStudioFromDiscogs({
+            studioName,
+            prompt: translatedPrompt,
+            limit: 240,
+          });
+          truth.studio_sync = {
+            studio: studioBackfillResult.studioName,
+            source: 'discogs',
+            attempted: studioBackfillResult.attempted,
+            imported: studioBackfillResult.imported,
+            inserted_evidence: studioBackfillResult.insertedEvidence,
+            skipped_reason: studioBackfillResult.skippedReason,
+          };
+
+          if (studioBackfillResult.attempted) {
+            recordRoutingBackfill('discogs', studioBackfillResult.insertedEvidence > 0);
+          }
+          console.log(
+            `[truth] studio sync studio="${studioBackfillResult.studioName}" imported=${studioBackfillResult.imported} inserted=${studioBackfillResult.insertedEvidence}${studioBackfillResult.skippedReason ? ` reason=${studioBackfillResult.skippedReason}` : ''}`
+          );
+
+          if (studioBackfillResult.insertedEvidence > 0 || studioBackfillResult.imported > 0) {
+            const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+              ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+              : [studioBackfillResult.studioName];
+            const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 260))
+              .map((row) => ({
+                artist: row.artist,
+                song: row.title,
+                reason: `Verified recording studio evidence for ${studioBackfillResult.studioName}`,
+              }));
+
+            candidateTracks = dedupeTracks([...studioSeedTracks, ...candidateTracks]);
+            verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
+          }
+        }
+      } else {
+        truth.studio_sync = {
+          studio: studioName,
+          source: 'discogs',
+          attempted: false,
+          imported: 0,
+          inserted_evidence: 0,
+          skipped_reason: 'disabled',
+        };
       }
     }
   }

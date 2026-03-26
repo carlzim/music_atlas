@@ -3432,6 +3432,35 @@ export function hasRecordingStudioEvidence(
   }
 }
 
+export function getTracksByRecordingStudioEvidence(
+  studioName: string,
+  limit = 120
+): Array<{ artist: string; title: string }> {
+  const normalizedStudio = buildStudioCanonicalKey(studioName);
+  if (!normalizedStudio) return [];
+
+  const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+  try {
+    const rows = db.prepare(`
+      SELECT DISTINCT r.artist AS artist, r.title AS title
+      FROM recording_studio_evidence rse
+      INNER JOIN recordings r ON r.id = rse.recording_id
+      WHERE COALESCE(rse.studio_name_canonical, lower(trim(rse.studio_name))) = ?
+      ORDER BY r.created_at DESC
+      LIMIT ?
+    `).all(normalizedStudio, safeLimit) as Array<{ artist?: string; title?: string }>;
+
+    return rows
+      .map((row) => ({
+        artist: typeof row.artist === 'string' ? row.artist.trim() : '',
+        title: typeof row.title === 'string' ? row.title.trim() : '',
+      }))
+      .filter((row) => row.artist.length > 0 && row.title.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export type AtlasNodeType = 'artist' | 'tag' | 'scene' | 'country' | 'city' | 'studio' | 'venue' | 'equipment' | 'playlist';
 
 export interface AtlasNodeSuggestion {

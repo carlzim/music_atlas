@@ -543,6 +543,30 @@ Return ONLY valid JSON in this format:
 }
 
 function extractPlaceEntityFromPrompt(prompt: string): string | null {
+  const normalizeExtractedPlace = (value: string): string => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+
+    const studioWithLocation = trimmed.match(/^(.+?\bstudios?\b)\s+(?:in|i)\s+(.+)$/i);
+    if (studioWithLocation) {
+      const studioPart = (studioWithLocation[1] || '').trim();
+      const locationPart = (studioWithLocation[2] || '').trim();
+      const locationLooksLikeClause = locationPart.includes(',')
+        || /^(?:the\s+)?(?:city|town|district|area|region|county)\b/i.test(locationPart)
+        || /\b(?:stockholm|london|los angeles|new york|berlin|paris|tokyo|philadelphia|nashville|memphis)\b/i.test(locationPart);
+      const locationContainsStudioName = /\bstudios?\b/i.test(locationPart);
+      const locationLooksLikeLocalArea = /\bstudios\b/i.test(studioPart)
+        && !locationContainsStudioName
+        && locationPart.length >= 3
+        && locationPart.length <= 40;
+      if (studioPart && (locationLooksLikeClause || locationLooksLikeLocalArea) && !locationContainsStudioName) {
+        return studioPart;
+      }
+    }
+
+    return trimmed;
+  };
+
   const patterns = [
     /\brecorded at the\s+([^.!?,;]+)/i,
     /\brecorded at\s+([^.!?,;]+)/i,
@@ -606,7 +630,8 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
       ''
     );
 
-    if (normalizedArticle) return normalizedArticle;
+    const normalizedPlace = normalizeExtractedPlace(normalizedArticle);
+    if (normalizedPlace) return normalizedPlace;
   }
 
   return null;

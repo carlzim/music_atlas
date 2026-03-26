@@ -329,8 +329,8 @@ function studioNameLikelyMatches(candidate: string, target: string): boolean {
 }
 
 function getDiscogsStudioMaxReleaseFetches(): number {
-  const parsed = Number(process.env.DISCOGS_STUDIO_MAX_RELEASE_FETCHES || 24);
-  if (!Number.isFinite(parsed) || parsed < 8) return 24;
+  const parsed = Number(process.env.DISCOGS_STUDIO_MAX_RELEASE_FETCHES || 12);
+  if (!Number.isFinite(parsed) || parsed < 8) return 12;
   return Math.max(8, Math.min(80, Math.floor(parsed)));
 }
 

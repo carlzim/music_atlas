@@ -3915,7 +3915,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           const studioBackfillResult = await backfillStudioFromDiscogs({
             studioName,
             prompt: translatedPrompt,
-            limit: 240,
+            limit: 80,
           });
           truth.studio_sync = {
             studio: studioBackfillResult.studioName,
@@ -3937,7 +3937,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
             const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
               ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
               : [studioBackfillResult.studioName];
-            const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 260))
+            const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 140))
               .map((row) => ({
                 artist: row.artist,
                 song: row.title,

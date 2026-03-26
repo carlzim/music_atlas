@@ -609,8 +609,8 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
     /\bengineered by\s+.+?\s+at\s+([^.!?,;]+)/i,
     /\barranged by\s+.+?\s+at the\s+([^.!?,;]+)/i,
     /\barranged by\s+.+?\s+at\s+([^.!?,;]+)/i,
-    /\b(?:inspelning(?:ar|arna)?|latar|spar)\s+fran\s+([^.!?,;]+)/i,
-    /\b(?:inspelning(?:ar|arna)?|latar|spar)\s+i\s+([^.!?,;]+)/i,
+    /\b(?:inspelning(?:ar|arna)?|latar|låtar|spar|spår)\s+(?:fran|från)\s+([^.!?,;]+)/i,
+    /\b(?:inspelning(?:ar|arna)?|latar|låtar|spar|spår)\s+i\s+([^.!?,;]+)/i,
   ];
   const stopAfter = /\b(?:engineered|produced|arranged|photographed|photography|art direction|cover design|artwork|mixed|mastered|for|with|by|using|featuring|feat\.?|including)\b/i;
 

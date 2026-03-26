@@ -1,3 +1,5 @@
+import { buildStudioCanonicalKey } from './normalize.js';
+
 export interface DiscogsReleaseCredit {
   artist: string;
   title: string;
@@ -302,6 +304,149 @@ export async function fetchDiscogsReleaseCreditsByQuery(
         releaseId,
         releaseTitle: releaseName,
         sourceRef: `discogs:release:${releaseId}`,
+      });
+    }
+  }
+
+  return output;
+}
+
+export interface DiscogsStudioTrack {
+  artist: string;
+  title: string;
+  studioName: string;
+  releaseId: number;
+  releaseTitle: string;
+  sourceRef: string;
+}
+
+function studioNameLikelyMatches(candidate: string, target: string): boolean {
+  const a = buildStudioCanonicalKey(candidate);
+  const b = buildStudioCanonicalKey(target);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.includes(b) || b.includes(a);
+}
+
+function extractReleaseArtists(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => extractDiscogsArtistName(item))
+    .filter((name) => name.length > 0);
+}
+
+export async function fetchDiscogsStudioTracksByLabel(
+  labelId: number,
+  targetStudioName: string,
+  limit = 120
+): Promise<DiscogsStudioTrack[]> {
+  const safeLabelId = Math.floor(Number(labelId));
+  const targetStudio = targetStudioName.trim();
+  const safeLimit = Math.max(1, Math.min(400, Math.floor(limit)));
+  if (!Number.isFinite(safeLabelId) || safeLabelId <= 0 || !targetStudio) return [];
+
+  const releaseIds: number[] = [];
+  const seenReleaseIds = new Set<number>();
+  const perPage = 100;
+  const maxPages = 4;
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const url = `${DISCOGS_BASE_URL}/labels/${safeLabelId}/releases?per_page=${perPage}&page=${page}`;
+    const raw = await rateLimitedDiscogsFetch(url) as { releases?: unknown[]; pagination?: { pages?: unknown } };
+    const releases = Array.isArray(raw.releases) ? raw.releases : [];
+
+    for (const item of releases) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as { id?: unknown; main_release?: unknown };
+      const idFromMain = typeof row.main_release === 'number' ? row.main_release : Number(row.main_release || 0);
+      const id = idFromMain > 0 ? idFromMain : (typeof row.id === 'number' ? row.id : Number(row.id || 0));
+      if (!Number.isFinite(id) || id <= 0 || seenReleaseIds.has(id)) continue;
+      seenReleaseIds.add(id);
+      releaseIds.push(id);
+      if (releaseIds.length >= safeLimit) break;
+    }
+
+    const totalPages = Number((raw.pagination as { pages?: unknown } | undefined)?.pages || page);
+    if (releaseIds.length >= safeLimit || !Number.isFinite(totalPages) || page >= totalPages) break;
+  }
+
+  const output: DiscogsStudioTrack[] = [];
+  const dedupe = new Set<string>();
+
+  for (const releaseId of releaseIds) {
+    if (output.length >= safeLimit) break;
+
+    const releaseUrl = `${DISCOGS_BASE_URL}/releases/${releaseId}`;
+    const releaseRaw = await rateLimitedDiscogsFetch(releaseUrl) as {
+      title?: unknown;
+      artists?: unknown[];
+      labels?: unknown[];
+      companies?: unknown[];
+      tracklist?: unknown[];
+    };
+
+    const releaseTitle = typeof releaseRaw.title === 'string' ? releaseRaw.title.trim() : '';
+    const releaseArtists = extractReleaseArtists(releaseRaw.artists);
+
+    const labelNames = Array.isArray(releaseRaw.labels)
+      ? releaseRaw.labels
+          .map((item) => {
+            if (!item || typeof item !== 'object') return '';
+            const value = item as { name?: unknown };
+            return typeof value.name === 'string' ? value.name.trim() : '';
+          })
+          .filter((name) => name.length > 0)
+      : [];
+
+    const companyRecordedAtNames = Array.isArray(releaseRaw.companies)
+      ? releaseRaw.companies
+          .map((item) => {
+            if (!item || typeof item !== 'object') return { name: '', role: '' };
+            const value = item as { name?: unknown; entity_type_name?: unknown };
+            const name = typeof value.name === 'string' ? value.name.trim() : '';
+            const role = typeof value.entity_type_name === 'string' ? value.entity_type_name.trim().toLowerCase() : '';
+            return { name, role };
+          })
+          .filter((row) => row.name.length > 0 && row.role.includes('recorded'))
+          .map((row) => row.name)
+      : [];
+
+    const allStudioHints = Array.from(new Set([...labelNames, ...companyRecordedAtNames]));
+    const hasStudioMatch = allStudioHints.length === 0
+      ? true
+      : allStudioHints.some((name) => studioNameLikelyMatches(name, targetStudio));
+    if (!hasStudioMatch) continue;
+
+    const tracklist = Array.isArray(releaseRaw.tracklist) ? releaseRaw.tracklist : [];
+    for (const track of tracklist) {
+      if (output.length >= safeLimit) break;
+      if (!track || typeof track !== 'object') continue;
+      const row = track as { title?: unknown; artists?: unknown[]; type_?: unknown; type?: unknown };
+      const title = typeof row.title === 'string' ? row.title.trim() : '';
+      if (!title) continue;
+
+      const typeValue = typeof row.type_ === 'string'
+        ? row.type_.trim().toLowerCase()
+        : typeof row.type === 'string'
+          ? row.type.trim().toLowerCase()
+          : '';
+      if (typeValue && typeValue !== 'track' && typeValue !== 'index') continue;
+
+      const trackArtists = extractReleaseArtists(row.artists);
+      const artist = (trackArtists[0] || releaseArtists[0] || '').trim();
+      if (!artist) continue;
+
+      const key = `${artist.toLowerCase()}::${title.toLowerCase()}::${safeLabelId}`;
+      if (dedupe.has(key)) continue;
+      dedupe.add(key);
+
+      output.push({
+        artist,
+        title,
+        studioName: targetStudio,
+        releaseId,
+        releaseTitle,
+        sourceRef: `discogs:label:${safeLabelId}:release:${releaseId}`,
       });
     }
   }

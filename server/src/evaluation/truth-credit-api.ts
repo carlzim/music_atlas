@@ -144,6 +144,7 @@ async function runTruthCreditApiCase(params: {
   const curationTargetReasonIntegrityConsistencyOk = response.truth?.curation?.composition?.target_reason_integrity_consistency_ok ?? null;
   const curationTargetReasonIntegrityMissReasons = response.truth?.curation?.composition?.target_reason_integrity_miss_reasons ?? null;
   const curationTargetReasonIntegrityMissCount = response.truth?.curation?.composition?.target_reason_integrity_miss_count ?? null;
+  const curationTargetReasonIntegrityMissCoverage = response.truth?.curation?.composition?.target_reason_integrity_miss_coverage ?? null;
   const curationTargetSizeMet = response.truth?.curation?.composition?.target_size_met ?? null;
   const curationTargetRetentionMet = response.truth?.curation?.composition?.target_retention_met ?? null;
   const curationTargetArtistMet = response.truth?.curation?.composition?.target_artist_met ?? null;
@@ -318,6 +319,11 @@ async function runTruthCreditApiCase(params: {
   const expectedTargetReasonIntegrityMissCount = expectedTargetReasonIntegrityMissReasons.length;
   const targetReasonIntegrityMissCountPass =
     curationTargetReasonIntegrityMissCount === expectedTargetReasonIntegrityMissCount;
+  const expectedTargetReasonIntegrityMissCoverage = expectedTargetReasonIntegrityTotalCount > 0
+    ? Math.min(1, expectedTargetReasonIntegrityMissCount / expectedTargetReasonIntegrityTotalCount)
+    : 0;
+  const targetReasonIntegrityMissCoveragePass = typeof curationTargetReasonIntegrityMissCoverage === 'number'
+    && nearlyEqual(curationTargetReasonIntegrityMissCoverage, expectedTargetReasonIntegrityMissCoverage);
   const targetReasonPartitionPass = curationTargetReasonPartitionOk === expectedTargetReasonPartitionOk;
   const targetSizeMetPass = curationTargetSizeMet === (expectedSelectedTrackGap === 0);
   const targetRetentionMetPass = curationTargetRetentionMet === ((expectedSelectionRetentionGap ?? 0) === 0);
@@ -377,6 +383,7 @@ async function runTruthCreditApiCase(params: {
     && targetReasonIntegrityConsistencyPass
     && targetReasonIntegrityMissReasonsPass
     && targetReasonIntegrityMissCountPass
+    && targetReasonIntegrityMissCoveragePass
     && targetReasonPartitionPass
     && targetSizeMetPass
     && targetRetentionMetPass

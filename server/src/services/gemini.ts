@@ -1529,6 +1529,71 @@ function studioLabelQualityScore(value: string): number {
   return score;
 }
 
+function extractRequestedDecades(prompt: string): number[] {
+  const requested = new Set<number>();
+  const normalized = normalize(prompt);
+
+  const decadeWordMatches = normalized.match(/\b((?:19|20)?\d0)(?:['’]?s|s)\b/g) || [];
+  for (const raw of decadeWordMatches) {
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (digits.length === 2) {
+      const decade = Number(digits);
+      if (Number.isFinite(decade)) {
+        requested.add(1900 + decade);
+      }
+      continue;
+    }
+    if (digits.length >= 3) {
+      const decade = Math.floor(Number(digits) / 10) * 10;
+      if (decade >= 1900 && decade <= 2090) requested.add(decade);
+    }
+  }
+
+  const swedishDecadeMatches = normalized.match(/\b(\d{2})-talet\b/g) || [];
+  for (const raw of swedishDecadeMatches) {
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (digits.length === 2) {
+      const decade = Number(digits);
+      if (Number.isFinite(decade)) requested.add(1900 + decade);
+    }
+  }
+
+  const explicitYearMatches = normalized.match(/\b(19\d{2}|20\d{2})\b/g) || [];
+  for (const raw of explicitYearMatches) {
+    const year = Number(raw);
+    if (!Number.isFinite(year) || year < 1900 || year > 2099) continue;
+    requested.add(Math.floor(year / 10) * 10);
+  }
+
+  return Array.from(requested).sort((a, b) => a - b);
+}
+
+async function applyRequestedDecadeFilter(prompt: string, tracks: Track[]): Promise<Track[]> {
+  const requestedDecades = extractRequestedDecades(prompt);
+  if (requestedDecades.length === 0 || tracks.length === 0) return tracks;
+
+  const allowed = new Set<number>(requestedDecades);
+  const withYears = await Promise.all(
+    tracks.map(async (track) => {
+      if (typeof track.release_year === 'number' && Number.isFinite(track.release_year)) {
+        return track;
+      }
+      try {
+        const info = await searchTrackWithDiagnostics(track.artist, track.song, prompt);
+        const year = typeof info.release_year === 'number' ? info.release_year : null;
+        return { ...track, release_year: year };
+      } catch {
+        return track;
+      }
+    })
+  );
+
+  return withYears.filter((track) => {
+    const decade = getTrackDecade(track);
+    return decade !== null && allowed.has(decade);
+  });
+}
+
 function dedupeStudiosByCanonical(studios: string[]): string[] {
   const deduped = new Map<string, string>();
   for (const raw of studios) {
@@ -4239,6 +4304,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   if (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit')) {
     playlist.tracks = applyGeneralArtistDiversity(playlist.tracks);
   }
+  if (constraint?.kind === 'studio') {
+    playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
+  }
   playlist.tracks = await sortTracksChronologicallyIfNeeded(translatedPrompt, playlist.tracks);
   if (!isHistoryOrStoryPrompt(translatedPrompt) && (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit'))) {
     playlist.tracks = staggerArtistsForFlow(playlist.tracks);
@@ -4265,8 +4333,15 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     if (constraint?.kind === 'studio') {
       const studioName = (constraint.value || '').trim();
       const evidenceCount = getCombinedStudioEvidenceCount(constraint);
+      const requestedDecades = extractRequestedDecades(translatedPrompt);
+      const requestedDecadeLabel = requestedDecades.length > 0
+        ? requestedDecades.map((decade) => `${decade}s`).join(', ')
+        : '';
       if (evidenceCount === 0) {
         throw new Error(`No recording-level studio evidence exists yet for ${studioName || 'this studio era'}. Try "Backfill studio evidence (Discogs)" and retry.`);
+      }
+      if (requestedDecadeLabel) {
+        throw new Error(`No verified studio tracks matched the requested decade (${requestedDecadeLabel}) for ${studioName || 'this studio'}. Try backfilling more evidence or broaden the year range.`);
       }
       throw new Error(`Not enough verified studio evidence yet for ${studioName || 'this studio era'}. Try "Backfill studio evidence (Discogs)" or broaden the prompt wording.`);
     }

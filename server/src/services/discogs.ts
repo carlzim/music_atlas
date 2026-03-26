@@ -328,6 +328,12 @@ function studioNameLikelyMatches(candidate: string, target: string): boolean {
   return a.includes(b) || b.includes(a);
 }
 
+function getDiscogsStudioMaxReleaseFetches(): number {
+  const parsed = Number(process.env.DISCOGS_STUDIO_MAX_RELEASE_FETCHES || 24);
+  if (!Number.isFinite(parsed) || parsed < 8) return 24;
+  return Math.max(8, Math.min(80, Math.floor(parsed)));
+}
+
 function extractReleaseArtists(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -349,6 +355,7 @@ export async function fetchDiscogsStudioTracksByLabel(
   const seenReleaseIds = new Set<number>();
   const perPage = 100;
   const maxPages = 4;
+  const maxReleaseFetches = Math.min(safeLimit, getDiscogsStudioMaxReleaseFetches());
 
   for (let page = 1; page <= maxPages; page += 1) {
     const url = `${DISCOGS_BASE_URL}/labels/${safeLabelId}/releases?per_page=${perPage}&page=${page}`;
@@ -363,11 +370,11 @@ export async function fetchDiscogsStudioTracksByLabel(
       if (!Number.isFinite(id) || id <= 0 || seenReleaseIds.has(id)) continue;
       seenReleaseIds.add(id);
       releaseIds.push(id);
-      if (releaseIds.length >= safeLimit) break;
+      if (releaseIds.length >= maxReleaseFetches) break;
     }
 
     const totalPages = Number((raw.pagination as { pages?: unknown } | undefined)?.pages || page);
-    if (releaseIds.length >= safeLimit || !Number.isFinite(totalPages) || page >= totalPages) break;
+    if (releaseIds.length >= maxReleaseFetches || !Number.isFinite(totalPages) || page >= totalPages) break;
   }
 
   const output: DiscogsStudioTrack[] = [];
@@ -452,4 +459,48 @@ export async function fetchDiscogsStudioTracksByLabel(
   }
 
   return output;
+}
+
+export async function searchDiscogsStudioLabelId(studioName: string): Promise<number | null> {
+  const targetStudio = studioName.trim();
+  if (!targetStudio) return null;
+
+  const url = `${DISCOGS_BASE_URL}/database/search?type=label&q=${encodeURIComponent(targetStudio)}&per_page=12`;
+  const raw = await rateLimitedDiscogsFetch(url) as { results?: unknown[] };
+  const results = Array.isArray(raw.results) ? raw.results : [];
+
+  let best: { id: number; score: number } | null = null;
+  for (const item of results) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { id?: unknown; title?: unknown; label?: unknown; type?: unknown };
+    const type = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+    if (type && type !== 'label') continue;
+
+    const id = typeof row.id === 'number' ? row.id : Number(row.id || 0);
+    if (!Number.isFinite(id) || id <= 0) continue;
+
+    const candidates = [row.title, row.label]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map((value) => value.trim());
+    if (candidates.length === 0) continue;
+
+    let score = 0;
+    for (const candidate of candidates) {
+      if (!studioNameLikelyMatches(candidate, targetStudio)) continue;
+      const candidateKey = buildStudioCanonicalKey(candidate);
+      const targetKey = buildStudioCanonicalKey(targetStudio);
+      if (candidateKey && targetKey && candidateKey === targetKey) {
+        score = Math.max(score, 1000 + candidate.length);
+      } else {
+        score = Math.max(score, 500 + candidate.length);
+      }
+    }
+    if (score <= 0) continue;
+
+    if (!best || score > best.score) {
+      best = { id, score };
+    }
+  }
+
+  return best?.id || null;
 }

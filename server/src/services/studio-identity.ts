@@ -55,6 +55,18 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
     successorNames: [],
     discogsLabelId: 263247,
   },
+  {
+    key: 'polar_studios_stockholm',
+    primaryName: 'Polar Studios, Stockholm',
+    aliases: [
+      'Polar Studios',
+      'Polar Studio',
+      'Polarstudion',
+      'Polarstudion, Stockholm',
+      'Polar Studios Stockholm',
+    ],
+    successorNames: [],
+  },
 ];
 
 interface CompiledStudioIdentity {

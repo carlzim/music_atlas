@@ -200,6 +200,12 @@ const AUTO_BACKFILL_COOLDOWN_MS = Math.max(
     ? Number(process.env.MUSICBRAINZ_AUTO_BACKFILL_COOLDOWN_MS || '600000')
     : 600000
 );
+const STUDIO_AUTO_BACKFILL_COOLDOWN_MS = Math.max(
+  0,
+  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_COOLDOWN_MS || '600000'))
+    ? Number(process.env.STUDIO_AUTO_BACKFILL_COOLDOWN_MS || '600000')
+    : 600000
+);
 const STUDIO_AUTO_BACKFILL_TIMEOUT_MS = Math.max(
   1000,
   Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '12000'))
@@ -1484,7 +1490,7 @@ function shouldAttemptStudioAutoBackfill(studioName: string, studioIdentityKey?:
   const now = Date.now();
   const last = lastAutoBackfillByStudio.get(key) || 0;
 
-  if (last > 0 && now - last < AUTO_BACKFILL_COOLDOWN_MS) {
+  if (last > 0 && now - last < STUDIO_AUTO_BACKFILL_COOLDOWN_MS) {
     return { allowed: false, reason: 'cooldown_active' };
   }
 

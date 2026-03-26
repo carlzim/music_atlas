@@ -249,6 +249,18 @@ function humanizeBackfillSkipReason(reason: string): string {
   return `Auto-backfill skipped: ${trimmed}`;
 }
 
+function humanizeStudioBackfillSkipReason(reason: string): string {
+  const trimmed = reason.trim();
+  if (!trimmed) return 'Studio backfill was skipped.';
+  if (trimmed === 'disabled') return 'Studio backfill is disabled by server configuration.';
+  if (trimmed === 'cooldown_active') return 'Studio backfill cooldown is active. Try again shortly.';
+  if (trimmed === 'missing_studio_name') return 'Studio name could not be inferred from the prompt.';
+  if (trimmed === 'missing_discogs_token') return 'Discogs is not configured on the server.';
+  if (trimmed === 'studio_discogs_label_missing') return 'No Discogs studio mapping is configured for this studio identity yet.';
+  if (trimmed === 'no_rows') return 'Discogs backfill ran but found no matching recording rows yet.';
+  return `Studio backfill skipped: ${trimmed}`;
+}
+
 function detectCreditRoleFromPrompt(prompt: string): PromptCreditRole | null {
   const value = prompt.trim();
   if (!value) return null;
@@ -815,7 +827,10 @@ function HomePage() {
       if (inserted > 0 || imported > 0) {
         setEvidenceMessage(`Backfilled ${inserted} studio evidence rows (${imported} imported) for ${studioName}. Regenerating playlist...`);
       } else {
-        setEvidenceMessage(`Studio backfill ran for ${studioName} but found no new rows${typeof payload.skippedReason === 'string' && payload.skippedReason ? ` (${payload.skippedReason})` : ''}. Regenerating playlist...`);
+        const skipMessage = typeof payload.skippedReason === 'string' && payload.skippedReason
+          ? humanizeStudioBackfillSkipReason(payload.skippedReason)
+          : 'Studio backfill ran but found no new rows yet.';
+        setEvidenceMessage(`${skipMessage} Regenerating playlist...`);
       }
 
       await generateFromPrompt(promptText);
@@ -936,7 +951,7 @@ function HomePage() {
               ? `, studio successors excluded ${truthSummary.studio_constraint.excluded_successor_matches ?? 'n/a'}`
               : ''}
             {truthSummary.studio_sync
-              ? `, studio backfill ${truthSummary.studio_sync.attempted ? `attempted (imported ${truthSummary.studio_sync.imported ?? 0}, inserted ${truthSummary.studio_sync.inserted_evidence ?? 0})` : `skipped${truthSummary.studio_sync.skipped_reason ? `: ${truthSummary.studio_sync.skipped_reason}` : ''}`}`
+              ? `, studio backfill ${truthSummary.studio_sync.attempted ? `attempted (imported ${truthSummary.studio_sync.imported ?? 0}, inserted ${truthSummary.studio_sync.inserted_evidence ?? 0})` : humanizeStudioBackfillSkipReason(truthSummary.studio_sync.skipped_reason || '')}`
               : ''}
             {truthSummary.curation?.composition
               ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}/${truthSummary.curation.composition.unique_decade_target ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`

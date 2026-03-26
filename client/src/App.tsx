@@ -261,6 +261,12 @@ function detectCreditRoleFromPrompt(prompt: string): PromptCreditRole | null {
   return null;
 }
 
+function isLikelyStudioPrompt(prompt: string): boolean {
+  const value = prompt.trim();
+  if (!value) return false;
+  return /\bstudios?\b|\brecorded\s+(?:at|in)\b|\btracked\s+(?:at|in)\b|\bcut\s+(?:at|in)\b|\binspelning(?:ar|arna)?\b|\bhistorien\s+om\b/i.test(value);
+}
+
 function isDiscogsBackfillRole(role: PromptCreditRole): boolean {
   return role === 'cover_designer' || role === 'art_director' || role === 'photographer';
 }
@@ -777,11 +783,55 @@ function HomePage() {
     }
   };
 
+  const handleBackfillStudioEvidence = async () => {
+    const promptText = prompt.trim();
+    if (!promptText) return;
+
+    setEvidenceLoading(true);
+    setEvidenceMessage(null);
+    try {
+      const response = await fetch('/api/evidence/backfill-studio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptText, limit: 160 }),
+      });
+
+      const payload = await response.json() as {
+        success?: boolean;
+        error?: unknown;
+        studioName?: string;
+        imported?: number;
+        insertedEvidence?: number;
+        skippedReason?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to backfill studio evidence');
+      }
+
+      const studioName = typeof payload.studioName === 'string' ? payload.studioName : 'the requested studio';
+      const imported = typeof payload.imported === 'number' ? payload.imported : 0;
+      const inserted = typeof payload.insertedEvidence === 'number' ? payload.insertedEvidence : 0;
+      if (inserted > 0 || imported > 0) {
+        setEvidenceMessage(`Backfilled ${inserted} studio evidence rows (${imported} imported) for ${studioName}. Regenerating playlist...`);
+      } else {
+        setEvidenceMessage(`Studio backfill ran for ${studioName} but found no new rows${typeof payload.skippedReason === 'string' && payload.skippedReason ? ` (${payload.skippedReason})` : ''}. Regenerating playlist...`);
+      }
+
+      await generateFromPrompt(promptText);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to backfill studio evidence');
+    } finally {
+      setEvidenceLoading(false);
+    }
+  };
+
   const isCreditEvidenceError = Boolean(
     error && /not enough verified credit evidence|only\s+\d+\s+strongly verified tracks|no verified\s+.+\s+evidence exists yet/i.test(error)
   );
   const detectedCreditRole = detectCreditRoleFromPrompt(prompt);
   const isLikelyCreditPrompt = Boolean(detectedCreditRole);
+  const likelyStudioPrompt = isLikelyStudioPrompt(prompt);
   const backfillSourceLabel = detectedCreditRole
     ? isDiscogsBackfillRole(detectedCreditRole)
       ? 'Discogs'
@@ -822,7 +872,13 @@ function HomePage() {
             {evidenceLoading ? 'Backfilling evidence...' : `Backfill credit evidence (${backfillSourceLabel})`}
           </button>
         )}
+        {likelyStudioPrompt && (
+          <button type="button" onClick={handleBackfillStudioEvidence} disabled={evidenceLoading || loading || !prompt.trim()}>
+            {evidenceLoading ? 'Backfilling evidence...' : 'Backfill studio evidence (Discogs)'}
+          </button>
+        )}
         {isLikelyCreditPrompt && <p className="credit-status hint">Credit prompt detected ({humanizeCreditRole(detectedCreditRole!)}). You can backfill evidence from {backfillSourceLabel} before generating.</p>}
+        {likelyStudioPrompt && <p className="credit-status hint">Studio prompt detected. You can backfill recording-level studio evidence from Discogs before generating.</p>}
         {isLikelyCreditPrompt && creditStatusBadge && <p className={creditStatusClass}>{creditStatusBadge}</p>}
       </form>
 

@@ -4,12 +4,13 @@ import cors from 'cors';
 import { randomUUID } from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { detectCreditPromptForEval, generatePlaylist } from './services/gemini.js';
+import { detectCreditPromptForEval, extractPlaceEntityFromPromptForEval, generatePlaylist } from './services/gemini.js';
 import { searchTrackCandidates, searchTrackCandidatesByIsrc, searchTrackWithDiagnostics } from './services/spotify.js';
 import { canonicalizeEquipmentName, getAllPlaylists, getPlaylistById, getPlaylistsByTag, getRelatedPlaylists, getTopTags, getPlaylistsByPlace, getPlaylistsByScene, getArtistAtlas, getCountryAtlas, getCityAtlas, getStudioAtlas, getVenueAtlas, getEquipmentAtlas, getConnectionPath, getCreditAtlas, getDuplicateTagCandidates, getTagStats, getRecordingDurationMs, getRecordingIsrc, getRecordingSpotifyUri, getRecordingSpotifyUrl, isGenericEquipmentName, isValidAtlasNodeType, mergeTagExact, searchAtlasNodeSuggestions, setRecordingDurationMs, setRecordingIsrc, setRecordingSpotifyUri, setRecordingSpotifyUrl, updatePlaylistTrackSpotifyUrls } from './services/db.js';
 import { backfillCreditFromMusicBrainz } from './services/evidence-backfill.js';
 import { resolveMusicBrainzRecordingMetadata } from './services/musicbrainz.js';
 import { backfillTruthCreditsFromDiscogs } from './services/truth-credit-layer.js';
+import { backfillStudioFromDiscogs } from './services/evidence-backfill-studio.js';
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -113,6 +114,12 @@ interface CreditEvidenceBackfillRequest {
   role: string;
   prompt?: string;
   query?: string;
+  limit?: number;
+}
+
+interface StudioEvidenceBackfillRequest {
+  studioName?: string;
+  prompt?: string;
   limit?: number;
 }
 
@@ -518,6 +525,38 @@ app.post('/api/evidence/backfill-credit-truth', async (req, res) => {
     res.json({ success: true, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to backfill truth credit evidence';
+    res.status(422).json({ error: message });
+  }
+});
+
+app.post('/api/evidence/backfill-studio', async (req, res) => {
+  const { studioName, prompt, limit } = req.body as StudioEvidenceBackfillRequest;
+
+  let resolvedStudioName = typeof studioName === 'string' ? studioName.trim() : '';
+  const resolvedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+
+  if (!resolvedStudioName && resolvedPrompt) {
+    const extracted = extractPlaceEntityFromPromptForEval(resolvedPrompt);
+    if (typeof extracted === 'string' && extracted.trim().length > 0) {
+      resolvedStudioName = extracted.trim();
+    }
+  }
+
+  if (!resolvedStudioName) {
+    res.status(400).json({ error: 'studioName is required (or provide a studio prompt to infer it)' });
+    return;
+  }
+
+  try {
+    const result = await backfillStudioFromDiscogs({
+      studioName: resolvedStudioName,
+      prompt: resolvedPrompt || undefined,
+      limit: typeof limit === 'number' ? limit : undefined,
+    });
+
+    res.json({ success: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to backfill studio evidence';
     res.status(422).json({ error: message });
   }
 });

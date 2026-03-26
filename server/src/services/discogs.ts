@@ -14,6 +14,7 @@ const DISCOGS_BASE_URL = 'https://api.discogs.com';
 const MIN_REQUEST_INTERVAL_MS = 1200;
 const DEFAULT_DISCOGS_FETCH_TIMEOUT_MS = 15000;
 let lastRequestStartedAt = 0;
+const studioLabelSearchCache = new Map<string, number | null>();
 
 function getDiscogsFetchTimeoutMs(): number {
   const parsed = Number(process.env.DISCOGS_FETCH_TIMEOUT_MS || DEFAULT_DISCOGS_FETCH_TIMEOUT_MS);
@@ -465,6 +466,12 @@ export async function searchDiscogsStudioLabelId(studioName: string): Promise<nu
   const targetStudio = studioName.trim();
   if (!targetStudio) return null;
 
+  const cacheKey = buildStudioCanonicalKey(targetStudio);
+  if (cacheKey) {
+    const cached = studioLabelSearchCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+  }
+
   const url = `${DISCOGS_BASE_URL}/database/search?type=label&q=${encodeURIComponent(targetStudio)}&per_page=12`;
   const raw = await rateLimitedDiscogsFetch(url) as { results?: unknown[] };
   const results = Array.isArray(raw.results) ? raw.results : [];
@@ -502,5 +509,10 @@ export async function searchDiscogsStudioLabelId(studioName: string): Promise<nu
     }
   }
 
-  return best?.id || null;
+  const resolved = best?.id || null;
+  if (cacheKey) {
+    studioLabelSearchCache.set(cacheKey, resolved);
+  }
+
+  return resolved;
 }

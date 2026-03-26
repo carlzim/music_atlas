@@ -547,15 +547,15 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
     const trimmed = value.trim();
     if (!trimmed) return '';
 
-    const studioWithLocation = trimmed.match(/^(.+?\bstudios?\b)\s+(?:in|i)\s+(.+)$/i);
+    const studioWithLocation = trimmed.match(/^(.+?\b(?:studio|studios|studion|studior|studiorna)\b)\s+(?:in|i)\s+(.+)$/i);
     if (studioWithLocation) {
       const studioPart = (studioWithLocation[1] || '').trim();
       const locationPart = (studioWithLocation[2] || '').trim();
       const locationLooksLikeClause = locationPart.includes(',')
         || /^(?:the\s+)?(?:city|town|district|area|region|county)\b/i.test(locationPart)
         || /\b(?:stockholm|london|los angeles|new york|berlin|paris|tokyo|philadelphia|nashville|memphis)\b/i.test(locationPart);
-      const locationContainsStudioName = /\bstudios?\b/i.test(locationPart);
-      const locationLooksLikeLocalArea = /\bstudios\b/i.test(studioPart)
+      const locationContainsStudioName = /\b(?:studio|studios|studion|studior|studiorna)\b/i.test(locationPart);
+      const locationLooksLikeLocalArea = /\b(?:studio|studios|studion|studior|studiorna)\b/i.test(studioPart)
         && !locationContainsStudioName
         && locationPart.length >= 3
         && locationPart.length <= 40;
@@ -599,10 +599,10 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
     /\b(?:recordings?|songs?|tracks?)\s+from\s+the\s+([^.!?,;]+)/i,
     /\b(?:recordings?|songs?|tracks?)\s+from\s+([^.!?,;]+)/i,
     /\b(?:recording|studio)\s+history\s+(?:of|at|from)\s+(?:the\s+)?([^.!?,;]+)/i,
-    /\b(?:the\s+)?story\s+(?:of|from|behind)\s+(?:the\s+)?([^.!?,;]+\bstudios?\b[^.!?,;]*)/i,
-    /\b(?:timeline|evolution|origins?)\s+of\s+(?:the\s+)?([^.!?,;]+\bstudios?\b[^.!?,;]*)/i,
-    /\bhistory\s+of\s+([^.!?,;]+\bstudios?\b[^.!?,;]*)/i,
-    /\bhistorien\s+om\s+([^.!?,;]+\bstudios?\b[^.!?,;]*)/i,
+    /\b(?:the\s+)?story\s+(?:of|from|behind)\s+(?:the\s+)?([^.!?,;]+\b(?:studio|studios|studion|studior|studiorna)\b[^.!?,;]*)/i,
+    /\b(?:timeline|evolution|origins?)\s+of\s+(?:the\s+)?([^.!?,;]+\b(?:studio|studios|studion|studior|studiorna)\b[^.!?,;]*)/i,
+    /\bhistory\s+of\s+([^.!?,;]+\b(?:studio|studios|studion|studior|studiorna)\b[^.!?,;]*)/i,
+    /\bhistorien\s+om\s+([^.!?,;]+\b(?:studio|studios|studion|studior|studiorna)\b[^.!?,;]*)/i,
     /\bproduced by\s+.+?\s+at the\s+([^.!?,;]+)/i,
     /\bproduced by\s+.+?\s+at\s+([^.!?,;]+)/i,
     /\bengineered by\s+.+?\s+at the\s+([^.!?,;]+)/i,
@@ -629,7 +629,7 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
       .replace(/\s+/g, ' ');
 
     const normalizedArticle = cleaned.replace(
-      /^the\s+(?=[^,]*\b(?:studio|studios|club|hall|theatre|theater|arena|venue)\b)/i,
+      /^the\s+(?=[^,]*\b(?:studio|studios|studion|studior|studiorna|club|hall|theatre|theater|arena|venue)\b)/i,
       ''
     );
 
@@ -682,7 +682,7 @@ function inferPlaceTypeHeuristic(name: string): 'studio' | 'venue' | 'unknown' {
   const normalized = name.trim().toLowerCase();
   if (!normalized) return 'unknown';
 
-  if (/\bstudios?\b/.test(normalized)) return 'studio';
+  if (/\b(?:studio|studios|studion|studior|studiorna)\b/.test(normalized)) return 'studio';
   if (/\b(?:club|hall|theatre|theater|arena|ballroom|bowl|stadium|venue)\b/.test(normalized)) return 'venue';
 
   return 'unknown';
@@ -959,7 +959,7 @@ function sanitizeLocationMetadata(input: {
   const studios = input.studios
     .map((v) => v.trim())
     .filter((v) => v.length > 0)
-    .filter((v) => /\b(studio|studios|recorders|recording)\b/i.test(v))
+    .filter((v) => /\b(studio|studios|studion|studior|studiorna|recorders|recording)\b/i.test(v))
     .filter((v) => !companyLike.test(v))
     .filter((v) => !personLike.test(v));
 
@@ -1024,7 +1024,7 @@ function getLegacyLocationFallback(placesRaw: string | null | undefined, placeRa
   const venues = new Set<string>();
 
   const entries = getLegacyPlaceEntries(placesRaw, placeRaw);
-  const studioRegex = /\b(studio|studios|recorders|recording)\b/i;
+  const studioRegex = /\b(studio|studios|studion|studior|studiorna|recorders|recording)\b/i;
   const venueRegex = /\b(club|hall|theatre|theater|arena|venue|cbgb)\b/i;
   const countryNames = new Set([
     'usa', 'united states', 'united kingdom', 'uk', 'england', 'france', 'germany', 'italy', 'spain',
@@ -1617,7 +1617,7 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
   const catalog = getAtlasEntityCatalog();
   const lowerPrompt = normalize(prompt);
   const credit = detectCreditPrompt(prompt);
-  const hasStudioCue = /\bstudio\b|\bstudios\b/.test(lowerPrompt);
+  const hasStudioCue = /\b(?:studio|studios|studion|studior|studiorna)\b/.test(lowerPrompt);
   const hasVenueCue = /\bvenue\b|\bclub\b|\bhall\b|\btheatre\b|\btheater\b|\barena\b|\bcbgb\b/.test(lowerPrompt);
   const hasSceneCue = /\bscene\b|\bmovement\b/.test(lowerPrompt);
   const hasArtistCue = /\bsongs? by\b|\btracks? by\b|\bartist\b|\bby\b/.test(lowerPrompt);

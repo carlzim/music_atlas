@@ -276,7 +276,7 @@ function detectCreditRoleFromPrompt(prompt: string): PromptCreditRole | null {
 function isLikelyStudioPrompt(prompt: string): boolean {
   const value = prompt.trim();
   if (!value) return false;
-  return /\bstudios?\b|\brecorded\s+(?:at|in)\b|\btracked\s+(?:at|in)\b|\bcut\s+(?:at|in)\b|\binspelning(?:ar|arna)?\b|\bhistorien\s+om\b/i.test(value);
+  return /\b(?:studio|studios|studion|studior|studiorna)\b|\brecorded\s+(?:at|in)\b|\btracked\s+(?:at|in)\b|\bcut\s+(?:at|in)\b|\binspelning(?:ar|arna)?\b|\bhistorien\s+om\b/i.test(value);
 }
 
 function isDiscogsBackfillRole(role: PromptCreditRole): boolean {

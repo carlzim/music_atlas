@@ -1560,6 +1560,25 @@ function extractRequestedDecades(prompt: string): number[] {
   const requested = new Set<number>();
   const normalized = normalize(prompt);
 
+  const decadeWordMap: Array<{ pattern: RegExp; decade: number }> = [
+    { pattern: /\b(?:nineteen\s+)?(?:fifties|50s)\b/i, decade: 1950 },
+    { pattern: /\b(?:nineteen\s+)?(?:sixties|60s)\b/i, decade: 1960 },
+    { pattern: /\b(?:nineteen\s+)?(?:seventies|70s)\b/i, decade: 1970 },
+    { pattern: /\b(?:nineteen\s+)?(?:eighties|80s)\b/i, decade: 1980 },
+    { pattern: /\b(?:nineteen\s+)?(?:nineties|90s)\b/i, decade: 1990 },
+    { pattern: /\b(?:tv[aå]tusen(?:tal(?:et)?)?|2000s)\b/i, decade: 2000 },
+    { pattern: /\b(?:tjugo(?:hundra)?tiotal(?:et)?|2010s)\b/i, decade: 2010 },
+    { pattern: /\b(?:tjugo(?:hundra)?tjugo(?:tal(?:et)?)?|2020s)\b/i, decade: 2020 },
+    { pattern: /\bfemtiotal(?:et)?\b/i, decade: 1950 },
+    { pattern: /\bsextiotal(?:et)?\b/i, decade: 1960 },
+    { pattern: /\bsjuttiotal(?:et)?\b/i, decade: 1970 },
+    { pattern: /\battiotal(?:et)?\b/i, decade: 1980 },
+    { pattern: /\bnittiotal(?:et)?\b/i, decade: 1990 },
+  ];
+  for (const entry of decadeWordMap) {
+    if (entry.pattern.test(normalized)) requested.add(entry.decade);
+  }
+
   const decadeWordMatches = normalized.match(/\b((?:19|20)?\d0)(?:['’]?s|s)\b/g) || [];
   for (const raw of decadeWordMatches) {
     const digits = raw.replace(/[^0-9]/g, '');

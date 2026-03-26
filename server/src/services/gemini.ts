@@ -93,12 +93,15 @@ interface TruthDetails {
   studio_constraint?: {
     requested_studio: string;
     studio_identity_key?: string;
+    requested_decades: number[];
     accepted_aliases: string[];
     excluded_successors: string[];
     candidate_input_tracks: number;
     accepted_evidence_matches: number;
     excluded_successor_matches: number;
-    verified_tracks: number;
+    verified_tracks_before_decade_filter: number;
+    verified_tracks_after_decade_filter: number;
+    decade_filtered_out_count: number;
   };
   curation?: {
     mode: PlaylistCurationMode;
@@ -4346,6 +4349,16 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     verification.evidence_after = getCombinedCreditEvidenceCount((constraint.value || '').trim(), (constraint.creditRole || '').trim());
   }
 
+  playlist.tracks = constraint ? verifiedTracks : candidateTracks;
+  if (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit')) {
+    playlist.tracks = applyGeneralArtistDiversity(playlist.tracks);
+  }
+  const studioVerifiedBeforeDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
+  if (constraint?.kind === 'studio') {
+    playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
+  }
+  const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
+
   if (constraint?.kind === 'studio') {
     const acceptedAliases = Array.isArray(constraint.studioAcceptedNames)
       ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
@@ -4354,25 +4367,24 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       ? Array.from(new Set(constraint.studioExcludedSuccessorNames.map((value) => value.trim()).filter(Boolean)))
       : [];
     const studioDiagnostics = summarizeStudioConstraintDiagnostics(candidateTracks, constraint);
+    const requestedDecades = extractRequestedDecades(translatedPrompt);
+    const beforeCount = studioVerifiedBeforeDecadeFilter ?? verifiedTracks.length;
+    const afterCount = studioVerifiedAfterDecadeFilter ?? playlist.tracks.length;
     truth.studio_constraint = {
       requested_studio: (constraint.value || '').trim(),
       studio_identity_key: constraint.studioIdentityKey,
+      requested_decades: requestedDecades,
       accepted_aliases: acceptedAliases,
       excluded_successors: excludedSuccessors,
       candidate_input_tracks: candidateTracks.length,
       accepted_evidence_matches: studioDiagnostics.acceptedEvidenceMatches,
       excluded_successor_matches: studioDiagnostics.excludedSuccessorMatches,
-      verified_tracks: verifiedTracks.length,
+      verified_tracks_before_decade_filter: beforeCount,
+      verified_tracks_after_decade_filter: afterCount,
+      decade_filtered_out_count: Math.max(0, beforeCount - afterCount),
     };
   }
 
-  playlist.tracks = constraint ? verifiedTracks : candidateTracks;
-  if (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit')) {
-    playlist.tracks = applyGeneralArtistDiversity(playlist.tracks);
-  }
-  if (constraint?.kind === 'studio') {
-    playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
-  }
   playlist.tracks = await sortTracksChronologicallyIfNeeded(translatedPrompt, playlist.tracks);
   if (!isHistoryOrStoryPrompt(translatedPrompt) && (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit'))) {
     playlist.tracks = staggerArtistsForFlow(playlist.tracks);

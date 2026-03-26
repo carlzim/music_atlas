@@ -112,12 +112,15 @@ interface TruthSummary {
   studio_constraint?: {
     requested_studio: string;
     studio_identity_key?: string;
+    requested_decades: number[];
     accepted_aliases: string[];
     excluded_successors: string[];
     candidate_input_tracks: number;
     accepted_evidence_matches: number;
     excluded_successor_matches: number;
-    verified_tracks: number;
+    verified_tracks_before_decade_filter: number;
+    verified_tracks_after_decade_filter: number;
+    decade_filtered_out_count: number;
   };
   curation?: {
     mode?: 'essential' | 'balanced' | 'deep_cuts';
@@ -947,7 +950,10 @@ function HomePage() {
               ? `, studio ${truthSummary.studio_constraint.requested_studio || 'n/a'}${truthSummary.studio_constraint.studio_identity_key ? ` (${truthSummary.studio_constraint.studio_identity_key})` : ''}`
               : ''}
             {truthSummary.studio_constraint
-              ? `, studio evidence ${truthSummary.studio_constraint.verified_tracks ?? 'n/a'}/${truthSummary.studio_constraint.candidate_input_tracks ?? 'n/a'} verified`
+              ? `, studio evidence ${truthSummary.studio_constraint.verified_tracks_after_decade_filter ?? 'n/a'}/${truthSummary.studio_constraint.candidate_input_tracks ?? 'n/a'} verified`
+              : ''}
+            {truthSummary.studio_constraint
+              ? `, decade filter ${truthSummary.studio_constraint.decade_filtered_out_count ?? 0} removed${Array.isArray(truthSummary.studio_constraint.requested_decades) && truthSummary.studio_constraint.requested_decades.length > 0 ? ` (requested ${truthSummary.studio_constraint.requested_decades.map((value) => `${value}s`).join('/')})` : ''}`
               : ''}
             {truthSummary.studio_constraint
               ? `, studio successors excluded ${truthSummary.studio_constraint.excluded_successor_matches ?? 'n/a'}`

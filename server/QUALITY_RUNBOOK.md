@@ -222,7 +222,7 @@ Returned diagnostics in `truth.curation`:
 Additional studio diagnostics in `truth` (outside `truth.curation`):
 
 - `studio_sync` (`studio`, `source`, `attempted`, `imported`, `inserted_evidence`, `skipped_reason`)
-- `studio_constraint` (`requested_studio`, `studio_identity_key`, `accepted_aliases`, `excluded_successors`, `candidate_input_tracks`, `accepted_evidence_matches`, `excluded_successor_matches`, `verified_tracks`)
+- `studio_constraint` (`requested_studio`, `studio_identity_key`, `requested_decades`, `accepted_aliases`, `excluded_successors`, `candidate_input_tracks`, `accepted_evidence_matches`, `excluded_successor_matches`, `verified_tracks_before_decade_filter`, `verified_tracks_after_decade_filter`, `decade_filtered_out_count`)
 
 ## If A Check Fails
 

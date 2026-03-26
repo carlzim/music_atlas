@@ -7,6 +7,7 @@ import { syncTruthMembershipForBandName } from './truth-layer.js';
 import { backfillTruthCreditsFromDiscogs, getTruthCreditCandidates, SUPPORTED_TRUTH_CREDIT_ROLES } from './truth-credit-layer.js';
 import { resolvePromptRoute } from './prompt-routing.js';
 import { recordRoutingBackfill, recordRoutingCall, recordRoutingFallback, recordRoutingSuccess } from './routing-observability.js';
+import { resolveStudioIdentity, resolveStudioIdentityFromPrompt } from './studio-identity.js';
 
 interface Track {
   artist: string;
@@ -1033,6 +1034,21 @@ interface PromptConstraint {
   strength: 'strict' | 'medium' | 'soft' | 'skip';
   creditRole?: string;
   creditMembersOfBand?: boolean;
+  studioIdentityKey?: string;
+  studioAcceptedNames?: string[];
+  studioExcludedSuccessorNames?: string[];
+}
+
+function collectStudioAssociatedArtists(studioNames: string[]): Set<string> {
+  const artists = new Set<string>();
+  for (const studioName of studioNames) {
+    if (!studioName || !studioName.trim()) continue;
+    for (const artistName of getAssociatedArtistsByNode('studio', studioName)) {
+      const normalizedArtist = normalize(artistName);
+      if (normalizedArtist) artists.add(normalizedArtist);
+    }
+  }
+  return artists;
 }
 
 function cleanCreditName(raw: string): string {
@@ -1540,22 +1556,50 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
   }
 
   if (hasStudioCue) {
-    const studio = findLongestIncluded(prompt, catalog.studios);
-    if (studio) {
+    const identityFromPrompt = resolveStudioIdentityFromPrompt(prompt);
+    if (identityFromPrompt) {
+      const acceptedNames = Array.from(new Set(identityFromPrompt.acceptedStudioNames));
       return {
         kind: 'studio',
-        value: studio,
-        associatedArtists: new Set(getAssociatedArtistsByNode('studio', studio).map(normalize)),
+        value: identityFromPrompt.primaryName,
+        associatedArtists: collectStudioAssociatedArtists(acceptedNames),
         strength: 'medium',
+        studioIdentityKey: identityFromPrompt.key,
+        studioAcceptedNames: acceptedNames,
+        studioExcludedSuccessorNames: identityFromPrompt.excludedSuccessorNames,
+      };
+    }
+
+    const studio = findLongestIncluded(prompt, catalog.studios);
+    if (studio) {
+      const resolvedIdentity = resolveStudioIdentity(studio);
+      const acceptedNames = resolvedIdentity
+        ? Array.from(new Set(resolvedIdentity.acceptedStudioNames))
+        : [studio];
+      return {
+        kind: 'studio',
+        value: resolvedIdentity?.primaryName || studio,
+        associatedArtists: collectStudioAssociatedArtists(acceptedNames),
+        strength: 'medium',
+        studioIdentityKey: resolvedIdentity?.key,
+        studioAcceptedNames: acceptedNames,
+        studioExcludedSuccessorNames: resolvedIdentity?.excludedSuccessorNames,
       };
     }
     const extractedPlace = extractPlaceEntityFromPrompt(prompt);
     if (extractedPlace && isValidPlaceEntityName(extractedPlace)) {
+      const resolvedIdentity = resolveStudioIdentity(extractedPlace);
+      const acceptedNames = resolvedIdentity
+        ? Array.from(new Set(resolvedIdentity.acceptedStudioNames))
+        : [extractedPlace];
       return {
         kind: 'studio',
-        value: extractedPlace,
-        associatedArtists: new Set(getAssociatedArtistsByNode('studio', extractedPlace).map(normalize)),
+        value: resolvedIdentity?.primaryName || extractedPlace,
+        associatedArtists: collectStudioAssociatedArtists(acceptedNames),
         strength: 'medium',
+        studioIdentityKey: resolvedIdentity?.key,
+        studioAcceptedNames: acceptedNames,
+        studioExcludedSuccessorNames: resolvedIdentity?.excludedSuccessorNames,
       };
     }
     return { kind: 'studio', value: '', associatedArtists: new Set(), strength: 'medium' };
@@ -1729,12 +1773,27 @@ function filterTracksByConstraint(
     const targetStudio = constraint.value.trim();
     if (!targetStudio) return [];
 
+    const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+      ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+      : [targetStudio];
+    const excludedSuccessors = Array.isArray(constraint.studioExcludedSuccessorNames)
+      ? Array.from(new Set(constraint.studioExcludedSuccessorNames.map((value) => value.trim()).filter(Boolean)))
+      : [];
+
     return tracks.filter((track) => {
-      const keep = hasRecordingStudioEvidence(track.artist, track.song, targetStudio);
-      if (!keep) {
-        console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="no recording-level studio evidence"`);
+      const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName));
+      if (!acceptedMatch) {
+        console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="no recording-level studio evidence for requested studio era"`);
+        return false;
       }
-      return keep;
+
+      const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName));
+      if (successorMatch) {
+        console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="matched excluded successor studio identity"`);
+        return false;
+      }
+
+      return true;
     });
   }
 

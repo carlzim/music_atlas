@@ -191,6 +191,18 @@ function runPlaceExtractionEmiSkarmarbrinkCase(): ParserCaseResult {
   };
 }
 
+function runPlaceExtractionEmiSkarmarbrinkSwedishCase(): ParserCaseResult {
+  const id = 'place_extract_emi_studios_skarmarbrink_swedish_phrase';
+  const prompt = 'De basta inspelningarna fran EMI studios i Skarmarbrink, Stockholm';
+  const extracted = extractPlaceEntityFromPromptForEval(prompt);
+  const pass = extracted === 'EMI studios';
+  return {
+    id,
+    pass,
+    details: `expected="EMI studios" actual="${extracted || ''}"`,
+  };
+}
+
 function runPlaceExtractionAirStudiosLondonCase(): ParserCaseResult {
   const id = 'place_extract_air_studios_london_phrase';
   const prompt = 'The best recordings from Air Studios London';
@@ -946,6 +958,7 @@ function run(): void {
     runPlaceExtractionTimelineOfCase(),
     runPlaceExtractionPossessiveStudioCase(),
     runPlaceExtractionEmiSkarmarbrinkCase(),
+    runPlaceExtractionEmiSkarmarbrinkSwedishCase(),
     runPlaceExtractionAirStudiosLondonCase(),
     runPlaceExtractionGoldStarHistoryCase(),
     runCoverArtCreditCase(),

@@ -602,12 +602,15 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
     /\b(?:the\s+)?story\s+(?:of|from|behind)\s+(?:the\s+)?([^.!?,;]+\bstudios?\b[^.!?,;]*)/i,
     /\b(?:timeline|evolution|origins?)\s+of\s+(?:the\s+)?([^.!?,;]+\bstudios?\b[^.!?,;]*)/i,
     /\bhistory\s+of\s+([^.!?,;]+\bstudios?\b[^.!?,;]*)/i,
+    /\bhistorien\s+om\s+([^.!?,;]+\bstudios?\b[^.!?,;]*)/i,
     /\bproduced by\s+.+?\s+at the\s+([^.!?,;]+)/i,
     /\bproduced by\s+.+?\s+at\s+([^.!?,;]+)/i,
     /\bengineered by\s+.+?\s+at the\s+([^.!?,;]+)/i,
     /\bengineered by\s+.+?\s+at\s+([^.!?,;]+)/i,
     /\barranged by\s+.+?\s+at the\s+([^.!?,;]+)/i,
     /\barranged by\s+.+?\s+at\s+([^.!?,;]+)/i,
+    /\b(?:inspelning(?:ar|arna)?|latar|spar)\s+fran\s+([^.!?,;]+)/i,
+    /\b(?:inspelning(?:ar|arna)?|latar|spar)\s+i\s+([^.!?,;]+)/i,
   ];
   const stopAfter = /\b(?:engineered|produced|arranged|photographed|photography|art direction|cover design|artwork|mixed|mastered|for|with|by|using|featuring|feat\.?|including)\b/i;
 

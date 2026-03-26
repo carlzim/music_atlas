@@ -829,6 +829,9 @@ function HomePage() {
   const isCreditEvidenceError = Boolean(
     error && /not enough verified credit evidence|only\s+\d+\s+strongly verified tracks|no verified\s+.+\s+evidence exists yet/i.test(error)
   );
+  const isStudioEvidenceError = Boolean(
+    error && /not enough verified studio evidence|no recording-level studio evidence exists yet/i.test(error)
+  );
   const detectedCreditRole = detectCreditRoleFromPrompt(prompt);
   const isLikelyCreditPrompt = Boolean(detectedCreditRole);
   const likelyStudioPrompt = isLikelyStudioPrompt(prompt);
@@ -1045,6 +1048,11 @@ function HomePage() {
         {isCreditEvidenceError && !isLikelyCreditPrompt && (
           <button type="button" onClick={handleBackfillEvidence} disabled={evidenceLoading || loading || !prompt.trim()}>
             {evidenceLoading ? 'Backfilling evidence...' : 'Backfill credit evidence from MusicBrainz and retry'}
+          </button>
+        )}
+        {isStudioEvidenceError && !likelyStudioPrompt && (
+          <button type="button" onClick={handleBackfillStudioEvidence} disabled={evidenceLoading || loading || !prompt.trim()}>
+            {evidenceLoading ? 'Backfilling evidence...' : 'Backfill studio evidence (Discogs) and retry'}
           </button>
         )}
         {evidenceMessage && <p>{evidenceMessage}</p>}

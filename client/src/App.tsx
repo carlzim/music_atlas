@@ -150,6 +150,7 @@ interface TruthSummary {
       target_reason_integrity_score?: number;
       target_reason_integrity_gap?: number;
       target_reason_integrity_consistency_ok?: boolean;
+      target_reason_integrity_miss_reasons?: string[];
       target_size_met?: boolean;
       target_retention_met?: boolean;
       target_artist_met?: boolean;
@@ -923,6 +924,9 @@ function HomePage() {
               : ''}
             {truthSummary.curation?.composition
               ? `, reason integrity consistency ${truthSummary.curation.composition.target_reason_integrity_consistency_ok === true ? 'ok' : truthSummary.curation.composition.target_reason_integrity_consistency_ok === false ? 'mismatch' : 'n/a'}`
+              : ''}
+            {truthSummary.curation?.composition
+              ? `, reason integrity misses ${Array.isArray(truthSummary.curation.composition.target_reason_integrity_miss_reasons) && truthSummary.curation.composition.target_reason_integrity_miss_reasons.length > 0 ? truthSummary.curation.composition.target_reason_integrity_miss_reasons.join('/') : 'none'}`
               : ''}
             {truthSummary.curation?.composition
               ? `, target status size ${truthSummary.curation.composition.target_size_met === true ? 'ok' : truthSummary.curation.composition.target_size_met === false ? 'miss' : 'n/a'} retention ${truthSummary.curation.composition.target_retention_met === true ? 'ok' : truthSummary.curation.composition.target_retention_met === false ? 'miss' : 'n/a'} artist ${truthSummary.curation.composition.target_artist_met === true ? 'ok' : truthSummary.curation.composition.target_artist_met === false ? 'miss' : 'n/a'} decade ${truthSummary.curation.composition.target_decade_met === true ? 'ok' : truthSummary.curation.composition.target_decade_met === false ? 'miss' : 'n/a'}`

@@ -90,6 +90,16 @@ interface TruthDetails {
     inserted_evidence: number;
     skipped_reason?: string;
   };
+  studio_constraint?: {
+    requested_studio: string;
+    studio_identity_key?: string;
+    accepted_aliases: string[];
+    excluded_successors: string[];
+    candidate_input_tracks: number;
+    accepted_evidence_matches: number;
+    excluded_successor_matches: number;
+    verified_tracks: number;
+  };
   curation?: {
     mode: PlaylistCurationMode;
     inferred_from_prompt: boolean;
@@ -1424,6 +1434,35 @@ function shouldAttemptStudioAutoBackfill(studioName: string, studioIdentityKey?:
 
   lastAutoBackfillByStudio.set(key, now);
   return { allowed: true };
+}
+
+function summarizeStudioConstraintDiagnostics(
+  tracks: Track[],
+  constraint: PromptConstraint
+): {
+  acceptedEvidenceMatches: number;
+  excludedSuccessorMatches: number;
+} {
+  const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+    ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+    : [constraint.value.trim()].filter(Boolean);
+  const excludedSuccessors = Array.isArray(constraint.studioExcludedSuccessorNames)
+    ? Array.from(new Set(constraint.studioExcludedSuccessorNames.map((value) => value.trim()).filter(Boolean)))
+    : [];
+
+  let acceptedEvidenceMatches = 0;
+  let excludedSuccessorMatches = 0;
+
+  for (const track of tracks) {
+    const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName));
+    if (!acceptedMatch) continue;
+    acceptedEvidenceMatches += 1;
+
+    const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName));
+    if (successorMatch) excludedSuccessorMatches += 1;
+  }
+
+  return { acceptedEvidenceMatches, excludedSuccessorMatches };
 }
 
 function hasStudioIntent(prompt: string): boolean {
@@ -4082,6 +4121,26 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
   if (verification && constraint?.kind === 'credit') {
     verification.evidence_after = getCombinedCreditEvidenceCount((constraint.value || '').trim(), (constraint.creditRole || '').trim());
+  }
+
+  if (constraint?.kind === 'studio') {
+    const acceptedAliases = Array.isArray(constraint.studioAcceptedNames)
+      ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+      : [];
+    const excludedSuccessors = Array.isArray(constraint.studioExcludedSuccessorNames)
+      ? Array.from(new Set(constraint.studioExcludedSuccessorNames.map((value) => value.trim()).filter(Boolean)))
+      : [];
+    const studioDiagnostics = summarizeStudioConstraintDiagnostics(candidateTracks, constraint);
+    truth.studio_constraint = {
+      requested_studio: (constraint.value || '').trim(),
+      studio_identity_key: constraint.studioIdentityKey,
+      accepted_aliases: acceptedAliases,
+      excluded_successors: excludedSuccessors,
+      candidate_input_tracks: candidateTracks.length,
+      accepted_evidence_matches: studioDiagnostics.acceptedEvidenceMatches,
+      excluded_successor_matches: studioDiagnostics.excludedSuccessorMatches,
+      verified_tracks: verifiedTracks.length,
+    };
   }
 
   playlist.tracks = constraint ? verifiedTracks : candidateTracks;

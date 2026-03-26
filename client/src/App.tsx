@@ -101,6 +101,24 @@ interface TruthSummary {
     imported: number;
     skipped_reason?: string;
   };
+  studio_sync?: {
+    studio: string;
+    source: 'discogs';
+    attempted: boolean;
+    imported: number;
+    inserted_evidence: number;
+    skipped_reason?: string;
+  };
+  studio_constraint?: {
+    requested_studio: string;
+    studio_identity_key?: string;
+    accepted_aliases: string[];
+    excluded_successors: string[];
+    candidate_input_tracks: number;
+    accepted_evidence_matches: number;
+    excluded_successor_matches: number;
+    verified_tracks: number;
+  };
   curation?: {
     mode?: 'essential' | 'balanced' | 'deep_cuts';
     inferred_from_prompt?: boolean;
@@ -849,6 +867,18 @@ function HomePage() {
           <p>
             Curation mode: <strong>{humanizeCurationMode(truthSummary.curation?.mode)}</strong>
             {truthSummary.curation?.inferred_from_prompt ? ' (prompt-inferred)' : ''}
+            {truthSummary.studio_constraint
+              ? `, studio ${truthSummary.studio_constraint.requested_studio || 'n/a'}${truthSummary.studio_constraint.studio_identity_key ? ` (${truthSummary.studio_constraint.studio_identity_key})` : ''}`
+              : ''}
+            {truthSummary.studio_constraint
+              ? `, studio evidence ${truthSummary.studio_constraint.verified_tracks ?? 'n/a'}/${truthSummary.studio_constraint.candidate_input_tracks ?? 'n/a'} verified`
+              : ''}
+            {truthSummary.studio_constraint
+              ? `, studio successors excluded ${truthSummary.studio_constraint.excluded_successor_matches ?? 'n/a'}`
+              : ''}
+            {truthSummary.studio_sync
+              ? `, studio backfill ${truthSummary.studio_sync.attempted ? `attempted (imported ${truthSummary.studio_sync.imported ?? 0}, inserted ${truthSummary.studio_sync.inserted_evidence ?? 0})` : `skipped${truthSummary.studio_sync.skipped_reason ? `: ${truthSummary.studio_sync.skipped_reason}` : ''}`}`
+              : ''}
             {truthSummary.curation?.composition
               ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}/${truthSummary.curation.composition.unique_decade_target ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`
               : ''}

@@ -194,6 +194,17 @@ function runStudioIdentityGoldStarCase(): StudioEvidenceCaseResult {
   };
 }
 
+function runStudioIdentityPolarCase(): StudioEvidenceCaseResult {
+  const id = 'studio_identity_polar_resolution';
+  const resolved = resolveStudioIdentityFromPrompt('The recordings of Polar studios');
+  const pass = resolved?.key === 'polar_studios_stockholm';
+  return {
+    id,
+    pass,
+    details: `identity=${resolved?.key || 'none'}`,
+  };
+}
+
 function run(): void {
   const strict = process.argv.includes('--strict');
   const db = new Database('playlists.db');
@@ -204,6 +215,7 @@ function run(): void {
     runStudioIdentityEmiPromptCase(),
     runStudioIdentityAirCase(),
     runStudioIdentityGoldStarCase(),
+    runStudioIdentityPolarCase(),
   ];
 
   const passed = results.filter((result) => result.pass).length;

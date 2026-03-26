@@ -4,7 +4,7 @@ import {
   getPlaylistByPrompt,
   savePlaylist,
 } from './db.js';
-import { fetchDiscogsStudioTracksByLabel, isDiscogsConfigured } from './discogs.js';
+import { fetchDiscogsStudioTracksByLabel, isDiscogsConfigured, searchDiscogsStudioLabelId } from './discogs.js';
 import { buildStudioCanonicalKey, canonicalizeDisplayName } from './normalize.js';
 import { resolveStudioIdentity, resolveStudioIdentityFromPrompt } from './studio-identity.js';
 
@@ -62,7 +62,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   const resolved = resolveStudioIdentity(inputStudio) || resolvedFromPrompt;
   const studioName = resolved?.primaryName || inputStudio;
   const studioIdentityKey = resolved?.key;
-  const discogsLabelId = resolved?.discogsLabelId;
+  let discogsLabelId = resolved?.discogsLabelId;
   const limit = normalizeLimit(params.limit);
 
   if (!studioName) {
@@ -90,6 +90,14 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
       skippedInvalid: 0,
       skippedReason: 'missing_discogs_token',
     };
+  }
+
+  if (!discogsLabelId || !Number.isFinite(discogsLabelId) || discogsLabelId <= 0) {
+    try {
+      discogsLabelId = await searchDiscogsStudioLabelId(studioName) || undefined;
+    } catch {
+      discogsLabelId = undefined;
+    }
   }
 
   if (!discogsLabelId || !Number.isFinite(discogsLabelId) || discogsLabelId <= 0) {

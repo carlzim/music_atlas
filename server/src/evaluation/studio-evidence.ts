@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { savePlaylist } from '../services/db.js';
+import { resolveStudioIdentity, resolveStudioIdentityFromPrompt } from '../services/studio-identity.js';
 
 interface StudioEvidenceCaseResult {
   id: string;
@@ -148,6 +149,51 @@ function runStudioAliasDedupCase(db: Database.Database): StudioEvidenceCaseResul
   }
 }
 
+function runStudioIdentityEmiPromptCase(): StudioEvidenceCaseResult {
+  const id = 'studio_identity_emi_prompt_resolves_era';
+  const prompt = 'De basta inspelningarna fran EMI studios i Skarmarbrink, Stockholm';
+  const resolved = resolveStudioIdentityFromPrompt(prompt);
+  const excluded = Array.isArray(resolved?.excludedSuccessorNames) ? resolved.excludedSuccessorNames : [];
+  const accepted = Array.isArray(resolved?.acceptedStudioNames) ? resolved.acceptedStudioNames : [];
+  const hasCosmosExcluded = excluded.some((value) => value.toLowerCase().includes('cosmos'));
+  const hasXLevelExcluded = excluded.some((value) => value.toLowerCase().includes('x-level'));
+  const accidentallyAcceptsSuccessor = accepted.some((value) => value.toLowerCase().includes('cosmos') || value.toLowerCase().includes('x-level'));
+  const pass = resolved?.key === 'emi_studios_stockholm'
+    && hasCosmosExcluded
+    && hasXLevelExcluded
+    && !accidentallyAcceptsSuccessor;
+  return {
+    id,
+    pass,
+    details: `identity=${resolved?.key || 'none'} accepted=${accepted.length} excluded=${excluded.length}`,
+  };
+}
+
+function runStudioIdentityAirCase(): StudioEvidenceCaseResult {
+  const id = 'studio_identity_air_alias_resolution';
+  const resolved = resolveStudioIdentity('Air Studios London');
+  const accepted = Array.isArray(resolved?.acceptedStudioNames) ? resolved.acceptedStudioNames : [];
+  const pass = resolved?.key === 'air_studios_london'
+    && accepted.some((value) => value.toLowerCase() === 'air studios')
+    && (resolved?.excludedSuccessorNames?.length || 0) === 0;
+  return {
+    id,
+    pass,
+    details: `identity=${resolved?.key || 'none'} accepted=${accepted.length}`,
+  };
+}
+
+function runStudioIdentityGoldStarCase(): StudioEvidenceCaseResult {
+  const id = 'studio_identity_gold_star_history_resolution';
+  const resolved = resolveStudioIdentityFromPrompt('The history of Gold Star studios');
+  const pass = resolved?.key === 'gold_star_studios_los_angeles';
+  return {
+    id,
+    pass,
+    details: `identity=${resolved?.key || 'none'}`,
+  };
+}
+
 function run(): void {
   const strict = process.argv.includes('--strict');
   const db = new Database('playlists.db');
@@ -155,6 +201,9 @@ function run(): void {
   const results: StudioEvidenceCaseResult[] = [
     runLabelPromptNoStudioEvidenceCase(db),
     runStudioAliasDedupCase(db),
+    runStudioIdentityEmiPromptCase(),
+    runStudioIdentityAirCase(),
+    runStudioIdentityGoldStarCase(),
   ];
 
   const passed = results.filter((result) => result.pass).length;

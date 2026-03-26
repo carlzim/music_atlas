@@ -179,6 +179,42 @@ function runPlaceExtractionPossessiveStudioCase(): ParserCaseResult {
   };
 }
 
+function runPlaceExtractionEmiSkarmarbrinkCase(): ParserCaseResult {
+  const id = 'place_extract_emi_studios_skarmarbrink_phrase';
+  const prompt = 'The best recordings from EMI studios in Skarmarbrink, Stockholm';
+  const extracted = extractPlaceEntityFromPromptForEval(prompt);
+  const pass = extracted === 'EMI studios in Skarmarbrink';
+  return {
+    id,
+    pass,
+    details: `expected="EMI studios in Skarmarbrink" actual="${extracted || ''}"`,
+  };
+}
+
+function runPlaceExtractionAirStudiosLondonCase(): ParserCaseResult {
+  const id = 'place_extract_air_studios_london_phrase';
+  const prompt = 'The best recordings from Air Studios London';
+  const extracted = extractPlaceEntityFromPromptForEval(prompt);
+  const pass = extracted === 'Air Studios London';
+  return {
+    id,
+    pass,
+    details: `expected="Air Studios London" actual="${extracted || ''}"`,
+  };
+}
+
+function runPlaceExtractionGoldStarHistoryCase(): ParserCaseResult {
+  const id = 'place_extract_gold_star_history_phrase';
+  const prompt = 'The history of Gold Star studios';
+  const extracted = extractPlaceEntityFromPromptForEval(prompt);
+  const pass = extracted === 'Gold Star studios';
+  return {
+    id,
+    pass,
+    details: `expected="Gold Star studios" actual="${extracted || ''}"`,
+  };
+}
+
 function runCoverArtCreditCase(): ParserCaseResult {
   const id = 'credit_detect_cover_art_created_by';
   const prompt = 'Songs from Albums with cover art created by Andy Warhol';
@@ -909,6 +945,9 @@ function run(): void {
     runPlaceExtractionRecordingHistoryAtCase(),
     runPlaceExtractionTimelineOfCase(),
     runPlaceExtractionPossessiveStudioCase(),
+    runPlaceExtractionEmiSkarmarbrinkCase(),
+    runPlaceExtractionAirStudiosLondonCase(),
+    runPlaceExtractionGoldStarHistoryCase(),
     runCoverArtCreditCase(),
     runSleeveDesignCreditCase(),
     runArtDirectionCreditCase(),

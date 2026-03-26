@@ -227,6 +227,18 @@ function runPlaceExtractionEmiStudionHistoryCase(): ParserCaseResult {
   };
 }
 
+function runPlaceExtractionEmiStudiosSeventiesSuffixCase(): ParserCaseResult {
+  const id = 'place_extract_emi_studios_seventies_suffix_phrase';
+  const prompt = "Songs from EMI studios Stockholm in the 70's";
+  const extracted = extractPlaceEntityFromPromptForEval(prompt);
+  const pass = extracted === 'EMI studios Stockholm';
+  return {
+    id,
+    pass,
+    details: `expected="EMI studios Stockholm" actual="${extracted || ''}"`,
+  };
+}
+
 function runPlaceExtractionAirStudiosLondonCase(): ParserCaseResult {
   const id = 'place_extract_air_studios_london_phrase';
   const prompt = 'The best recordings from Air Studios London';
@@ -985,6 +997,7 @@ function run(): void {
     runPlaceExtractionEmiSkarmarbrinkSwedishCase(),
     runPlaceExtractionEmiSkarmarbrinkSwedishDiacriticsCase(),
     runPlaceExtractionEmiStudionHistoryCase(),
+    runPlaceExtractionEmiStudiosSeventiesSuffixCase(),
     runPlaceExtractionAirStudiosLondonCase(),
     runPlaceExtractionGoldStarHistoryCase(),
     runCoverArtCreditCase(),

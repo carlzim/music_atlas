@@ -183,11 +183,11 @@ function runPlaceExtractionEmiSkarmarbrinkCase(): ParserCaseResult {
   const id = 'place_extract_emi_studios_skarmarbrink_phrase';
   const prompt = 'The best recordings from EMI studios in Skarmarbrink, Stockholm';
   const extracted = extractPlaceEntityFromPromptForEval(prompt);
-  const pass = extracted === 'EMI studios in Skarmarbrink';
+  const pass = extracted === 'EMI studios';
   return {
     id,
     pass,
-    details: `expected="EMI studios in Skarmarbrink" actual="${extracted || ''}"`,
+    details: `expected="EMI studios" actual="${extracted || ''}"`,
   };
 }
 

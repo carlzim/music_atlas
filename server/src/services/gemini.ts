@@ -3212,6 +3212,34 @@ function getCombinedCreditEvidenceCount(creditName: string, creditRole: string):
   return getCreditEvidenceTrackCandidates(syntheticConstraint, 500).length;
 }
 
+function getCombinedStudioEvidenceCount(constraint: PromptConstraint | null): number {
+  if (!constraint || constraint.kind !== 'studio') return 0;
+
+  const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+    ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+    : [(constraint.value || '').trim()].filter(Boolean);
+  const excludedSuccessors = Array.isArray(constraint.studioExcludedSuccessorNames)
+    ? Array.from(new Set(constraint.studioExcludedSuccessorNames.map((value) => value.trim()).filter(Boolean)))
+    : [];
+
+  const uniqueTracks = new Set<string>();
+  for (const studioName of acceptedStudios) {
+    const rows = getTracksByRecordingStudioEvidence(studioName, 500);
+    for (const row of rows) {
+      const artistKey = normalize(row.artist);
+      const titleKey = normalize(row.title);
+      if (!artistKey || !titleKey) continue;
+
+      const hasExcludedSuccessor = excludedSuccessors.some((successorName) => hasRecordingStudioEvidence(row.artist, row.title, successorName));
+      if (hasExcludedSuccessor) continue;
+
+      uniqueTracks.add(`${artistKey}::${titleKey}`);
+    }
+  }
+
+  return uniqueTracks.size;
+}
+
 function countUniqueTrackArtists(tracks: Track[]): number {
   const artists = new Set<string>();
   for (const track of tracks) {
@@ -4197,6 +4225,14 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         throw new Error(`No verified ${creditRole || 'credit'} evidence exists yet for ${creditName || 'this name'}. Generate a few related playlists that explicitly include this credit, or backfill evidence first.`);
       }
       throw new Error('Not enough verified credit evidence yet for this prompt. Try a broader prompt, or generate a few related playlists first to build evidence.');
+    }
+    if (constraint?.kind === 'studio') {
+      const studioName = (constraint.value || '').trim();
+      const evidenceCount = getCombinedStudioEvidenceCount(constraint);
+      if (evidenceCount === 0) {
+        throw new Error(`No recording-level studio evidence exists yet for ${studioName || 'this studio era'}. Try "Backfill studio evidence (Discogs)" and retry.`);
+      }
+      throw new Error(`Not enough verified studio evidence yet for ${studioName || 'this studio era'}. Try "Backfill studio evidence (Discogs)" or broaden the prompt wording.`);
     }
     throw new Error('Could not generate a non-empty playlist for this prompt. Please try a broader prompt.');
   }

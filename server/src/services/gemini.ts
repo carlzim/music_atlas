@@ -1490,7 +1490,11 @@ function shouldAttemptAutoBackfill(creditName: string, creditRole: string): { al
   return { allowed: true };
 }
 
-function shouldAttemptStudioAutoBackfill(studioName: string, studioIdentityKey?: string): { allowed: boolean; reason?: string } {
+function shouldAttemptStudioAutoBackfill(
+  studioName: string,
+  studioIdentityKey?: string,
+  forceWhenEvidenceMissing = false
+): { allowed: boolean; reason?: string } {
   const namePart = studioIdentityKey || normalize(studioName);
   if (!namePart) {
     return { allowed: false, reason: 'invalid_studio' };
@@ -1499,12 +1503,25 @@ function shouldAttemptStudioAutoBackfill(studioName: string, studioIdentityKey?:
   const now = Date.now();
   const last = lastAutoBackfillByStudio.get(key) || 0;
 
-  if (last > 0 && now - last < STUDIO_AUTO_BACKFILL_COOLDOWN_MS) {
+  if (!forceWhenEvidenceMissing && last > 0 && now - last < STUDIO_AUTO_BACKFILL_COOLDOWN_MS) {
     return { allowed: false, reason: 'cooldown_active' };
   }
 
   lastAutoBackfillByStudio.set(key, now);
   return { allowed: true };
+}
+
+function humanizeStudioBackfillReason(reason: string | undefined): string {
+  const value = (reason || '').trim();
+  if (!value) return 'unknown reason';
+  if (value === 'timeout') return 'timed out while fetching Discogs data';
+  if (value === 'cooldown_active') return 'cooldown was active';
+  if (value === 'missing_discogs_token') return 'Discogs token is missing';
+  if (value === 'studio_discogs_label_missing') return 'no Discogs label match was found';
+  if (value === 'no_rows') return 'Discogs returned no recording rows for this studio';
+  if (value === 'disabled') return 'studio backfill is disabled by configuration';
+  if (value.startsWith('error:')) return value.slice(6);
+  return value;
 }
 
 function summarizeStudioConstraintDiagnostics(
@@ -3960,7 +3977,13 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     if (studioName) {
       const studioBackfillEnabled = process.env.ENABLE_STUDIO_DISCOGS_BACKFILL !== 'false';
       if (studioBackfillEnabled) {
-        const studioBackfillWindow = shouldAttemptStudioAutoBackfill(studioName, constraint.studioIdentityKey);
+        const evidenceBeforeStudioBackfill = getCombinedStudioEvidenceCount(constraint);
+        const forceStudioBackfillAttempt = evidenceBeforeStudioBackfill === 0;
+        const studioBackfillWindow = shouldAttemptStudioAutoBackfill(
+          studioName,
+          constraint.studioIdentityKey,
+          forceStudioBackfillAttempt
+        );
         if (!studioBackfillWindow.allowed) {
           truth.studio_sync = {
             studio: studioName,
@@ -4435,12 +4458,13 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         ? requestedDecades.map((decade) => `${decade}s`).join(', ')
         : '';
       if (evidenceCount === 0) {
-        throw new Error(`No recording-level studio evidence exists yet for ${studioName || 'this studio era'}. Try "Backfill studio evidence (Discogs)" and retry.`);
+        const syncReason = humanizeStudioBackfillReason(truth.studio_sync?.skipped_reason);
+        throw new Error(`Automatic studio backfill could not load recording-level evidence for ${studioName || 'this studio era'} (${syncReason}).`);
       }
       if (requestedDecadeLabel) {
         throw new Error(`No verified studio tracks matched the requested decade (${requestedDecadeLabel}) for ${studioName || 'this studio'}. Try backfilling more evidence or broaden the year range.`);
       }
-      throw new Error(`Not enough verified studio evidence yet for ${studioName || 'this studio era'}. Try "Backfill studio evidence (Discogs)" or broaden the prompt wording.`);
+      throw new Error(`Not enough verified studio evidence yet for ${studioName || 'this studio era'}. Automatic backfill ran but the current evidence is still too sparse.`);
     }
     throw new Error('Could not generate a non-empty playlist for this prompt. Please try a broader prompt.');
   }

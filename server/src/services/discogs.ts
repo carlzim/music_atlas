@@ -396,16 +396,6 @@ export async function fetchDiscogsStudioTracksByLabel(
     const releaseTitle = typeof releaseRaw.title === 'string' ? releaseRaw.title.trim() : '';
     const releaseArtists = extractReleaseArtists(releaseRaw.artists);
 
-    const labelNames = Array.isArray(releaseRaw.labels)
-      ? releaseRaw.labels
-          .map((item) => {
-            if (!item || typeof item !== 'object') return '';
-            const value = item as { name?: unknown };
-            return typeof value.name === 'string' ? value.name.trim() : '';
-          })
-          .filter((name) => name.length > 0)
-      : [];
-
     const companyRecordedAtNames = Array.isArray(releaseRaw.companies)
       ? releaseRaw.companies
           .map((item) => {
@@ -419,11 +409,11 @@ export async function fetchDiscogsStudioTracksByLabel(
           .map((row) => row.name)
       : [];
 
-    const allStudioHints = Array.from(new Set([...labelNames, ...companyRecordedAtNames]));
-    const hasStudioMatch = allStudioHints.length === 0
-      ? true
-      : allStudioHints.some((name) => studioNameLikelyMatches(name, targetStudio));
-    if (!hasStudioMatch) continue;
+    const recordedAtHints = Array.from(new Set(companyRecordedAtNames));
+    if (recordedAtHints.length > 0) {
+      const hasRecordedAtStudioMatch = recordedAtHints.some((name) => studioNameLikelyMatches(name, targetStudio));
+      if (!hasRecordedAtStudioMatch) continue;
+    }
 
     const tracklist = Array.isArray(releaseRaw.tracklist) ? releaseRaw.tracklist : [];
     for (const track of tracklist) {

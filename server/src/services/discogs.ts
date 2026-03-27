@@ -342,6 +342,57 @@ function extractReleaseArtists(value: unknown): string[] {
     .filter((name) => name.length > 0);
 }
 
+function getDiscogsReleaseCommunityScore(value: unknown): number {
+  if (!value || typeof value !== 'object') return 0;
+  const row = value as { stats?: unknown; year?: unknown; format?: unknown };
+  const stats = row.stats && typeof row.stats === 'object' ? row.stats as { community?: unknown } : null;
+  const community = stats?.community && typeof stats.community === 'object'
+    ? stats.community as { in_collection?: unknown; in_wantlist?: unknown }
+    : null;
+
+  const inCollection = Number(community?.in_collection || 0);
+  const inWantlist = Number(community?.in_wantlist || 0);
+  const year = Number(row.year || 0);
+  const format = typeof row.format === 'string' ? row.format.toLowerCase() : '';
+
+  const collectionScore = Number.isFinite(inCollection) ? Math.max(0, inCollection) : 0;
+  const wantlistScore = Number.isFinite(inWantlist) ? Math.max(0, inWantlist) : 0;
+  const yearScore = Number.isFinite(year) && year >= 1950 && year <= 1999 ? 8 : 0;
+  const albumBoost = /\balbum\b/.test(format) ? 24 : 0;
+  const singlePenalty = /\bsingle\b|\b12"\b|\b7"\b|\bep\b/.test(format) ? -14 : 0;
+
+  return (collectionScore * 3) + wantlistScore + yearScore + albumBoost + singlePenalty;
+}
+
+function getDiscogsStudioTrackTitleQualityScore(title: string): number {
+  const value = title.trim();
+  if (!value) return -100;
+
+  let score = 20;
+  const lower = value.toLowerCase();
+
+  if (/\b(remix|mix|dub|edit|version|instrumental|karaoke|rework|radio edit|extended)\b/.test(lower)) score -= 12;
+  if (/\b(live|demo|outtake|rehearsal|mono|stereo mix)\b/.test(lower)) score -= 8;
+  if (/\b(202\d|201\d|200\d remaster|remaster(?:ed)?)\b/.test(lower)) score -= 4;
+
+  const lengthPenalty = Math.max(0, value.split(/\s+/).length - 5);
+  score -= lengthPenalty;
+
+  return score;
+}
+
+function getDiscogsCanonicalTrackTitleKey(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\s+-\s+.*$/g, ' ')
+    .replace(/\b(remix|mix|dub|edit|version|instrumental|karaoke|rework|radio|extended|live|demo)\b/g, ' ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export async function fetchDiscogsStudioTracksByLabel(
   labelId: number,
   targetStudioName: string,
@@ -352,8 +403,7 @@ export async function fetchDiscogsStudioTracksByLabel(
   const safeLimit = Math.max(1, Math.min(400, Math.floor(limit)));
   if (!Number.isFinite(safeLabelId) || safeLabelId <= 0 || !targetStudio) return [];
 
-  const releaseIds: number[] = [];
-  const seenReleaseIds = new Set<number>();
+  const releaseCandidates = new Map<number, number>();
   const perPage = 100;
   const maxPages = 4;
   const maxReleaseFetches = Math.min(safeLimit, getDiscogsStudioMaxReleaseFetches());
@@ -368,21 +418,27 @@ export async function fetchDiscogsStudioTracksByLabel(
       const row = item as { id?: unknown; main_release?: unknown };
       const idFromMain = typeof row.main_release === 'number' ? row.main_release : Number(row.main_release || 0);
       const id = idFromMain > 0 ? idFromMain : (typeof row.id === 'number' ? row.id : Number(row.id || 0));
-      if (!Number.isFinite(id) || id <= 0 || seenReleaseIds.has(id)) continue;
-      seenReleaseIds.add(id);
-      releaseIds.push(id);
-      if (releaseIds.length >= maxReleaseFetches) break;
+      if (!Number.isFinite(id) || id <= 0) continue;
+      const communityScore = getDiscogsReleaseCommunityScore(item);
+      const existingScore = releaseCandidates.get(id) || 0;
+      if (communityScore > existingScore) releaseCandidates.set(id, communityScore);
+      if (releaseCandidates.size >= maxReleaseFetches * 4) break;
     }
 
     const totalPages = Number((raw.pagination as { pages?: unknown } | undefined)?.pages || page);
-    if (releaseIds.length >= maxReleaseFetches || !Number.isFinite(totalPages) || page >= totalPages) break;
+    if (releaseCandidates.size >= maxReleaseFetches * 4 || !Number.isFinite(totalPages) || page >= totalPages) break;
   }
 
-  const output: DiscogsStudioTrack[] = [];
+  const releaseIds = Array.from(releaseCandidates.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxReleaseFetches)
+    .map(([id]) => id);
+
+  const output: Array<DiscogsStudioTrack & { _rank: number }> = [];
   const dedupe = new Set<string>();
 
   for (const releaseId of releaseIds) {
-    if (output.length >= safeLimit) break;
+    if (output.length >= safeLimit * 4) break;
 
     const releaseUrl = `${DISCOGS_BASE_URL}/releases/${releaseId}`;
     const releaseRaw = await rateLimitedDiscogsFetch(releaseUrl) as {
@@ -434,10 +490,13 @@ export async function fetchDiscogsStudioTracksByLabel(
       const artist = (trackArtists[0] || releaseArtists[0] || '').trim();
       if (!artist) continue;
 
-      const key = `${artist.toLowerCase()}::${title.toLowerCase()}::${safeLabelId}`;
+      const canonicalTitle = getDiscogsCanonicalTrackTitleKey(title) || title.toLowerCase();
+      const key = `${artist.toLowerCase()}::${canonicalTitle}::${safeLabelId}`;
       if (dedupe.has(key)) continue;
       dedupe.add(key);
 
+      const releaseCommunityScore = releaseCandidates.get(releaseId) || 0;
+      const titleQualityScore = getDiscogsStudioTrackTitleQualityScore(title);
       output.push({
         artist,
         title,
@@ -445,11 +504,15 @@ export async function fetchDiscogsStudioTracksByLabel(
         releaseId,
         releaseTitle,
         sourceRef: `discogs:label:${safeLabelId}:release:${releaseId}`,
+        _rank: (releaseCommunityScore * 10) + titleQualityScore,
       });
     }
   }
 
-  return output;
+  return output
+    .sort((a, b) => b._rank - a._rank)
+    .slice(0, safeLimit)
+    .map(({ _rank, ...row }) => row);
 }
 
 export async function searchDiscogsStudioLabelId(studioName: string): Promise<number | null> {

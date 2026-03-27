@@ -107,6 +107,8 @@ interface TruthSummary {
     attempted: boolean;
     imported: number;
     inserted_evidence: number;
+    discogs_label_id?: number;
+    discogs_label_source?: 'identity' | 'search';
     skipped_reason?: string;
   };
   studio_constraint?: {
@@ -819,6 +821,8 @@ function HomePage() {
         studioName?: string;
         imported?: number;
         insertedEvidence?: number;
+        discogsLabelId?: number;
+        discogsLabelSource?: 'identity' | 'search';
         skippedReason?: string;
       };
 
@@ -829,8 +833,11 @@ function HomePage() {
       const studioName = typeof payload.studioName === 'string' ? payload.studioName : 'the requested studio';
       const imported = typeof payload.imported === 'number' ? payload.imported : 0;
       const inserted = typeof payload.insertedEvidence === 'number' ? payload.insertedEvidence : 0;
+      const labelDetails = typeof payload.discogsLabelId === 'number'
+        ? ` (label ${payload.discogsLabelId}${payload.discogsLabelSource ? ` via ${payload.discogsLabelSource}` : ''})`
+        : '';
       if (inserted > 0 || imported > 0) {
-        setEvidenceMessage(`Backfilled ${inserted} studio evidence rows (${imported} imported) for ${studioName}. Regenerating playlist...`);
+        setEvidenceMessage(`Backfilled ${inserted} studio evidence rows (${imported} imported) for ${studioName}${labelDetails}. Regenerating playlist...`);
       } else {
         const skipMessage = typeof payload.skippedReason === 'string' && payload.skippedReason
           ? humanizeStudioBackfillSkipReason(payload.skippedReason)
@@ -959,7 +966,7 @@ function HomePage() {
               ? `, studio successors excluded ${truthSummary.studio_constraint.excluded_successor_matches ?? 'n/a'}`
               : ''}
             {truthSummary.studio_sync
-              ? `, studio backfill ${truthSummary.studio_sync.attempted ? `attempted (imported ${truthSummary.studio_sync.imported ?? 0}, inserted ${truthSummary.studio_sync.inserted_evidence ?? 0})` : humanizeStudioBackfillSkipReason(truthSummary.studio_sync.skipped_reason || '')}`
+              ? `, studio backfill ${truthSummary.studio_sync.attempted ? `attempted (imported ${truthSummary.studio_sync.imported ?? 0}, inserted ${truthSummary.studio_sync.inserted_evidence ?? 0}${typeof truthSummary.studio_sync.discogs_label_id === 'number' ? `, label ${truthSummary.studio_sync.discogs_label_id}` : ''}${truthSummary.studio_sync.discogs_label_source ? ` via ${truthSummary.studio_sync.discogs_label_source}` : ''})` : humanizeStudioBackfillSkipReason(truthSummary.studio_sync.skipped_reason || '')}`
               : ''}
             {truthSummary.curation?.composition
               ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}/${truthSummary.curation.composition.unique_decade_target ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`

@@ -88,6 +88,8 @@ interface TruthDetails {
     attempted: boolean;
     imported: number;
     inserted_evidence: number;
+    discogs_label_id?: number;
+    discogs_label_source?: 'identity' | 'search';
     skipped_reason?: string;
   };
   studio_constraint?: {
@@ -3960,6 +3962,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
             attempted: false,
             imported: 0,
             inserted_evidence: 0,
+            discogs_label_source: constraint.studioIdentityKey ? 'identity' : undefined,
             skipped_reason: studioBackfillWindow.reason || 'cooldown_active',
           };
           console.log(`[truth] studio sync skipped reason=${studioBackfillWindow.reason || 'cooldown_active'}`);
@@ -3980,6 +3983,8 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
               attempted: studioBackfillResult.attempted,
               imported: studioBackfillResult.imported,
               inserted_evidence: studioBackfillResult.insertedEvidence,
+              discogs_label_id: studioBackfillResult.discogsLabelId,
+              discogs_label_source: studioBackfillResult.discogsLabelSource,
               skipped_reason: studioBackfillResult.skippedReason,
             };
 
@@ -4015,6 +4020,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
               attempted: false,
               imported: 0,
               inserted_evidence: 0,
+              discogs_label_source: constraint.studioIdentityKey ? 'identity' : undefined,
               skipped_reason: skippedReason,
             };
             console.log(`[truth] studio sync skipped reason=${skippedReason}`);
@@ -4027,6 +4033,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           attempted: false,
           imported: 0,
           inserted_evidence: 0,
+          discogs_label_source: constraint.studioIdentityKey ? 'identity' : undefined,
           skipped_reason: 'disabled',
         };
       }

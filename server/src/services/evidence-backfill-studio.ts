@@ -18,6 +18,8 @@ export interface StudioEvidenceBackfillResult {
   attempted: boolean;
   studioName: string;
   studioIdentityKey?: string;
+  discogsLabelId?: number;
+  discogsLabelSource?: 'identity' | 'search';
   imported: number;
   insertedRecordings: number;
   insertedEvidence: number;
@@ -63,6 +65,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   const studioName = resolved?.primaryName || inputStudio;
   const studioIdentityKey = resolved?.key;
   let discogsLabelId = resolved?.discogsLabelId;
+  let discogsLabelSource: 'identity' | 'search' | undefined = discogsLabelId ? 'identity' : undefined;
   const limit = normalizeLimit(params.limit);
 
   if (!studioName) {
@@ -83,6 +86,8 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
       attempted: false,
       studioName,
       studioIdentityKey,
+      discogsLabelId,
+      discogsLabelSource,
       imported: 0,
       insertedRecordings: 0,
       insertedEvidence: 0,
@@ -95,6 +100,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   if (!discogsLabelId || !Number.isFinite(discogsLabelId) || discogsLabelId <= 0) {
     try {
       discogsLabelId = await searchDiscogsStudioLabelId(studioName) || undefined;
+      if (discogsLabelId) discogsLabelSource = 'search';
     } catch {
       discogsLabelId = undefined;
     }
@@ -105,6 +111,8 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
       attempted: false,
       studioName,
       studioIdentityKey,
+      discogsLabelId,
+      discogsLabelSource,
       imported: 0,
       insertedRecordings: 0,
       insertedEvidence: 0,
@@ -121,6 +129,8 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
       attempted: true,
       studioName,
       studioIdentityKey,
+      discogsLabelId,
+      discogsLabelSource,
       imported: 0,
       insertedRecordings: 0,
       insertedEvidence: 0,
@@ -195,6 +205,8 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     attempted: true,
     studioName,
     studioIdentityKey,
+    discogsLabelId,
+    discogsLabelSource,
     imported: discogsTracks.length,
     insertedRecordings,
     insertedEvidence,

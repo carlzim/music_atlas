@@ -397,6 +397,21 @@ function getDiscogsCanonicalTrackTitleKey(title: string): string {
     .trim();
 }
 
+function isCompilationLikeRelease(releaseTitle: string, releaseArtists: string[]): boolean {
+  const title = releaseTitle.trim().toLowerCase();
+  const artists = releaseArtists.map((value) => value.trim().toLowerCase());
+
+  if (/\b(various|compilation|greatest hits|best of|anthology|collection|mix(?:ed)? by|now that's what i call)\b/.test(title)) {
+    return true;
+  }
+
+  if (artists.some((value) => value === 'various' || value === 'various artists' || value === 'v.a.')) {
+    return true;
+  }
+
+  return false;
+}
+
 function buildDiscogsStudioTracksFromRelease(
   releaseId: number,
   releaseRaw: {
@@ -415,6 +430,7 @@ function buildDiscogsStudioTracksFromRelease(
 
   const releaseTitle = typeof releaseRaw.title === 'string' ? releaseRaw.title.trim() : '';
   const releaseArtists = extractReleaseArtists(releaseRaw.artists);
+  if (isCompilationLikeRelease(releaseTitle, releaseArtists)) return [];
   const tracks: RankedDiscogsStudioTrack[] = [];
   const tracklist = Array.isArray(releaseRaw.tracklist) ? releaseRaw.tracklist : [];
 

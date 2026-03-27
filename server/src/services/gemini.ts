@@ -199,6 +199,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const GEMINI_RETRY_DELAYS_MS = [0, 1000, 3000];
 const MAX_PLAYLIST_TRACKS = 25;
+const MIN_PLAYLIST_TRACKS = 8;
 const AUTO_BACKFILL_COOLDOWN_MS = Math.max(
   0,
   Number.isFinite(Number(process.env.MUSICBRAINZ_AUTO_BACKFILL_COOLDOWN_MS || '600000'))
@@ -1543,11 +1544,11 @@ function summarizeStudioConstraintDiagnostics(
   let excludedSuccessorMatches = 0;
 
   for (const track of tracks) {
-    const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName));
+    const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
     if (!acceptedMatch) continue;
     acceptedEvidenceMatches += 1;
 
-    const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName));
+    const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
     if (successorMatch) excludedSuccessorMatches += 1;
   }
 
@@ -2102,13 +2103,13 @@ function filterTracksByConstraint(
       : [];
 
     return tracks.filter((track) => {
-      const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName));
+      const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
       if (!acceptedMatch) {
         console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="no recording-level studio evidence for requested studio era"`);
         return false;
       }
 
-      const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName));
+      const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
       if (successorMatch) {
         console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="matched excluded successor studio identity"`);
         return false;
@@ -3451,13 +3452,13 @@ function getCombinedStudioEvidenceCount(constraint: PromptConstraint | null): nu
 
   const uniqueTracks = new Set<string>();
   for (const studioName of acceptedStudios) {
-    const rows = getTracksByRecordingStudioEvidence(studioName, 500);
+    const rows = getTracksByRecordingStudioEvidence(studioName, 500, true);
     for (const row of rows) {
       const artistKey = normalize(row.artist);
       const titleKey = normalize(row.title);
       if (!artistKey || !titleKey) continue;
 
-      const hasExcludedSuccessor = excludedSuccessors.some((successorName) => hasRecordingStudioEvidence(row.artist, row.title, successorName));
+      const hasExcludedSuccessor = excludedSuccessors.some((successorName) => hasRecordingStudioEvidence(row.artist, row.title, successorName, true));
       if (hasExcludedSuccessor) continue;
 
       uniqueTracks.add(`${artistKey}::${titleKey}`);
@@ -4120,7 +4121,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         };
       }
 
-      const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 180))
+      const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 180, true))
         .map((row) => ({
           artist: row.artist,
           song: row.title,
@@ -4535,6 +4536,13 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
   if (constraint?.kind === 'credit' && playlist.tracks.length < MIN_VERIFIED_TRACKS) {
     throw new Error(`Only ${playlist.tracks.length} strongly verified tracks were found for this credit constraint. Try a broader prompt, or generate a few related playlists first to build evidence.`);
+  }
+
+  if (playlist.tracks.length < MIN_PLAYLIST_TRACKS) {
+    if (constraint?.kind === 'studio') {
+      throw new Error(`Strict studio precision mode found only ${playlist.tracks.length} recorded-at tracks for ${constraint.value || 'this studio'}. At least ${MIN_PLAYLIST_TRACKS} are required.`);
+    }
+    throw new Error(`Only ${playlist.tracks.length} tracks were generated. At least ${MIN_PLAYLIST_TRACKS} are required.`);
   }
 
   // Store with translated prompt

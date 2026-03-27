@@ -1743,8 +1743,50 @@ async function rankStudioTracksByRecognition(
       ? 2
       : 0;
     const finalScore = preferredArtistBoost + yearBoost - variantPenalty - commercialPenalty - mainstreamPenalty;
-    return { track, index, finalScore };
+    return { track, index, finalScore, recognitionScore: 0 };
   });
+
+  if (mainstreamPrompt) {
+    const lookupCap = Math.min(6, scored.length);
+    const lookupTimeoutMs = 1200;
+
+    const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
+      return await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), timeoutMs);
+        promise
+          .then((value) => {
+            clearTimeout(timer);
+            resolve(value);
+          })
+          .catch(() => {
+            clearTimeout(timer);
+            resolve(null);
+          });
+      });
+    };
+
+    const preRankedForLookup = [...scored]
+      .sort((a, b) => {
+        if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+        return a.index - b.index;
+      })
+      .slice(0, lookupCap);
+
+    await Promise.all(preRankedForLookup.map(async (item) => {
+      const info = await withTimeout(
+        searchTrackWithDiagnostics(item.track.artist, item.track.song, _prompt),
+        lookupTimeoutMs
+      );
+      const recognition = typeof info?.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
+      item.recognitionScore = recognition;
+      item.finalScore += Math.min(8, recognition / 20);
+      if (info?.spotify_url && !item.track.spotify_url) item.track.spotify_url = info.spotify_url;
+      if (info?.album_image_url && !item.track.album_image_url) item.track.album_image_url = info.album_image_url;
+      if (typeof info?.release_year === 'number' && typeof item.track.release_year !== 'number') {
+        item.track.release_year = info.release_year;
+      }
+    }));
+  }
 
   scored.sort((a, b) => {
     if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;

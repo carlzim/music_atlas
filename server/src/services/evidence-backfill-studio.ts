@@ -410,6 +410,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     }
 
     if (discogsLabelId && Number.isFinite(discogsLabelId) && discogsLabelId > 0) {
+      try {
       const desiredDiscogsSeed = Math.max(limit, 120);
       const mainstreamHintLimit = mainstreamPrompt ? 3 : effectiveArtistHints.length;
       const prioritizedHints = effectiveArtistHints.slice(0, mainstreamHintLimit);
@@ -517,6 +518,9 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
         mergedByKey.set(key, row);
       }
       studioTracks = Array.from(mergedByKey.values());
+      } catch {
+        // Discogs fallback should not fail studio generation if rate-limited.
+      }
     }
   }
 

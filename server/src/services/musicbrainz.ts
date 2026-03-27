@@ -5,6 +5,23 @@ export interface MusicBrainzArtistSearchResult {
   type: string;
 }
 
+export interface MusicBrainzPlaceSearchResult {
+  id: string;
+  name: string;
+  score: number;
+  type: string;
+  disambiguation: string;
+}
+
+export interface MusicBrainzStudioTrack {
+  artist: string;
+  title: string;
+  recordingMbid: string;
+  relationType: string;
+  begin: string | null;
+  end: string | null;
+}
+
 interface MusicBrainzCreditTrack {
   artist: string;
   title: string;
@@ -88,6 +105,20 @@ function formatArtistCredit(artistCredit: unknown): string {
   }
 
   return combined.trim();
+}
+
+function normalizeStudioType(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function normalizeStudioMatch(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\brecording\s+studios?\b/g, 'studio')
+    .replace(/\bstudios\b/g, 'studio')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function mapCreditRoleToRelationTypes(role: string): Set<string> {
@@ -214,6 +245,153 @@ export async function searchMusicBrainzArtistsByName(name: string, limit = 5): P
       return { id, name: artistName, score, type };
     })
     .filter((item): item is MusicBrainzArtistSearchResult => Boolean(item));
+}
+
+export async function searchMusicBrainzPlacesByName(name: string, limit = 5): Promise<MusicBrainzPlaceSearchResult[]> {
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+
+  const safeLimit = Math.max(1, Math.min(20, Math.floor(limit)));
+  const query = encodeURIComponent(trimmed);
+  const url = `${MUSICBRAINZ_BASE_URL}/place/?query=${query}&fmt=json&limit=${safeLimit}`;
+  const raw = await rateLimitedFetchJson(url) as { places?: unknown[] };
+  const places = Array.isArray(raw.places) ? raw.places : [];
+
+  return places
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const row = item as {
+        id?: unknown;
+        name?: unknown;
+        score?: unknown;
+        type?: unknown;
+        disambiguation?: unknown;
+      };
+      const id = typeof row.id === 'string' ? row.id.trim() : '';
+      const placeName = typeof row.name === 'string' ? row.name.trim() : '';
+      const score = Number(row.score || 0);
+      const type = typeof row.type === 'string' ? row.type.trim() : '';
+      const disambiguation = typeof row.disambiguation === 'string' ? row.disambiguation.trim() : '';
+      if (!id || !placeName) return null;
+      return { id, name: placeName, score, type, disambiguation };
+    })
+    .filter((item): item is MusicBrainzPlaceSearchResult => Boolean(item));
+}
+
+export async function resolveMusicBrainzStudioPlace(
+  studioName: string,
+  acceptedNames: string[] = []
+): Promise<MusicBrainzPlaceSearchResult | null> {
+  const base = studioName.trim();
+  if (!base) return null;
+
+  const queries = Array.from(
+    new Set(
+      [
+        base,
+        ...acceptedNames,
+        base.replace(/,\s*london$/i, ''),
+        base.replace(/,\s*stockholm$/i, ''),
+        base.replace(/,\s*los angeles$/i, ''),
+      ]
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 6);
+
+  const baseCanonical = normalizeStudioMatch(base);
+  let best: { candidate: MusicBrainzPlaceSearchResult; rank: number } | null = null;
+
+  for (const query of queries) {
+    let candidates: MusicBrainzPlaceSearchResult[] = [];
+    try {
+      candidates = await searchMusicBrainzPlacesByName(query, 8);
+    } catch {
+      candidates = [];
+    }
+
+    for (const candidate of candidates) {
+      const type = normalizeStudioType(candidate.type);
+      if (type && type !== 'studio') continue;
+
+      const candidateCanonical = normalizeStudioMatch(candidate.name);
+      if (!candidateCanonical) continue;
+
+      const exact = candidateCanonical === baseCanonical;
+      const includes = !exact && (candidateCanonical.includes(baseCanonical) || baseCanonical.includes(candidateCanonical));
+      const score = Number.isFinite(candidate.score) ? candidate.score : 0;
+      const rank = (exact ? 10000 : includes ? 7000 : 0) + score;
+
+      if (!best || rank > best.rank) {
+        best = { candidate, rank };
+      }
+    }
+
+    if (best && best.rank >= 10000) break;
+  }
+
+  return best?.candidate || null;
+}
+
+export async function fetchMusicBrainzStudioTracksByPlace(
+  placeMbid: string,
+  limit = 200
+): Promise<MusicBrainzStudioTrack[]> {
+  const mbid = placeMbid.trim();
+  if (!mbid) return [];
+
+  const safeLimit = Math.max(1, Math.min(2000, Math.floor(limit)));
+  const url = `${MUSICBRAINZ_BASE_URL}/place/${encodeURIComponent(mbid)}?inc=recording-rels+artist-credits&fmt=json`;
+  const raw = await rateLimitedFetchJson(url) as { relations?: unknown[] };
+  const relations = Array.isArray(raw.relations) ? raw.relations : [];
+
+  const dedupe = new Set<string>();
+  const output: MusicBrainzStudioTrack[] = [];
+
+  for (const relation of relations) {
+    if (!relation || typeof relation !== 'object') continue;
+    const row = relation as {
+      type?: unknown;
+      begin?: unknown;
+      end?: unknown;
+      ['target-type']?: unknown;
+      recording?: {
+        id?: unknown;
+        title?: unknown;
+        ['artist-credit']?: unknown;
+      };
+    };
+
+    const relationType = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+    const targetType = typeof row['target-type'] === 'string' ? row['target-type'].trim().toLowerCase() : '';
+    if (relationType !== 'recorded at' || targetType !== 'recording') continue;
+
+    const recording = row.recording;
+    const recordingMbid = typeof recording?.id === 'string' ? recording.id.trim() : '';
+    const title = typeof recording?.title === 'string' ? recording.title.trim() : '';
+    const artist = formatArtistCredit(recording?.['artist-credit']);
+    if (!recordingMbid || !title || !artist) continue;
+
+    const key = `${recordingMbid}::${artist.toLowerCase()}::${title.toLowerCase()}`;
+    if (dedupe.has(key)) continue;
+    dedupe.add(key);
+
+    const begin = typeof row.begin === 'string' && row.begin.trim().length > 0 ? row.begin.trim() : null;
+    const end = typeof row.end === 'string' && row.end.trim().length > 0 ? row.end.trim() : null;
+
+    output.push({
+      artist,
+      title,
+      recordingMbid,
+      relationType,
+      begin,
+      end,
+    });
+
+    if (output.length >= safeLimit) break;
+  }
+
+  return output;
 }
 
 export async function resolveMusicBrainzPerson(name: string): Promise<MusicBrainzArtistSearchResult | null> {

@@ -84,12 +84,14 @@ interface TruthDetails {
   };
   studio_sync?: {
     studio: string;
-    source: 'discogs';
+    source: 'discogs' | 'musicbrainz' | 'hybrid';
     attempted: boolean;
     imported: number;
     inserted_evidence: number;
     discogs_label_id?: number;
     discogs_label_source?: 'identity' | 'search';
+    musicbrainz_place_id?: string;
+    musicbrainz_place_name?: string;
     skipped_reason?: string;
   };
   studio_constraint?: {
@@ -1679,36 +1681,41 @@ function getStudioTrackVariantPenalty(songTitle: string): number {
   return penalty;
 }
 
+function getStudioTrackCommercialPenalty(artistName: string, songTitle: string): number {
+  const artist = artistName.toLowerCase();
+  const title = songTitle.toLowerCase();
+  let penalty = 0;
+
+  const artistCommaCount = (artistName.match(/,/g) || []).length;
+  if (artistCommaCount >= 2) penalty += 6;
+  if (artistName.length >= 64) penalty += 6;
+  if (songTitle.length >= 80) penalty += 6;
+
+  if (/\b(orchestra|symphony|philharmonic|choir|ensemble|quartet|quintet|conductor)\b/.test(artist)) penalty += 8;
+  if (/\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+)\b/.test(title)) penalty += 8;
+  if (/\b(arie|aria|overture|recitativo|sinfonia)\b/.test(title)) penalty += 6;
+
+  return penalty;
+}
+
 async function rankStudioTracksByRecognition(
-  prompt: string,
+  _prompt: string,
   tracks: Track[],
   preferredArtists: Set<string>
 ): Promise<Track[]> {
   if (tracks.length <= 1) return tracks;
 
-  const scored = await Promise.all(
-    tracks.map(async (track, index) => {
-      let recognitionScore = 0;
-      try {
-        const info = await searchTrackWithDiagnostics(track.artist, track.song, prompt);
-        if (!track.spotify_url && info.spotify_url) track.spotify_url = info.spotify_url;
-        if (!track.album_image_url && info.album_image_url) track.album_image_url = info.album_image_url;
-        if (typeof track.release_year !== 'number' && typeof info.release_year === 'number') {
-          track.release_year = info.release_year;
-        }
-        recognitionScore = typeof info.score === 'number' && Number.isFinite(info.score)
-          ? info.score
-          : 0;
-      } catch {
-        recognitionScore = 0;
-      }
-
-      const variantPenalty = getStudioTrackVariantPenalty(track.song);
-      const preferredArtistBoost = preferredArtists.has(normalize(track.artist)) ? 3 : 0;
-      const finalScore = recognitionScore - variantPenalty + preferredArtistBoost;
-      return { track, index, finalScore };
-    })
-  );
+  const scored = tracks.map((track, index) => {
+    const variantPenalty = getStudioTrackVariantPenalty(track.song);
+    const commercialPenalty = getStudioTrackCommercialPenalty(track.artist, track.song);
+    const preferredArtistBoost = preferredArtists.has(normalize(track.artist)) ? 3 : 0;
+    const releaseYear = typeof track.release_year === 'number' && Number.isFinite(track.release_year)
+      ? Math.floor(track.release_year)
+      : null;
+    const yearBoost = releaseYear !== null && releaseYear >= 1955 && releaseYear <= 1999 ? 1 : 0;
+    const finalScore = preferredArtistBoost + yearBoost - variantPenalty - commercialPenalty;
+    return { track, index, finalScore };
+  });
 
   scored.sort((a, b) => {
     if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
@@ -3123,6 +3130,50 @@ function applyGeneralArtistDiversity(tracks: Track[]): Track[] {
   return chosen.length > 0 ? chosen : tracks;
 }
 
+function applyStudioArtistDiversity(tracks: Track[]): Track[] {
+  if (tracks.length <= 1) return tracks;
+
+  const desiredCount = Math.min(MAX_PLAYLIST_TRACKS, tracks.length);
+  const chosen: Track[] = [];
+  const chosenKeys = new Set<string>();
+  const artistCounts = new Map<string, number>();
+
+  const getTrackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
+
+  const addWithArtistCap = (artistCap: number): void => {
+    for (const track of tracks) {
+      if (chosen.length >= desiredCount) break;
+      const trackKey = getTrackKey(track);
+      if (!trackKey || chosenKeys.has(trackKey)) continue;
+      const artistKey = normalize(track.artist);
+      if (!artistKey) continue;
+      const artistCount = artistCounts.get(artistKey) || 0;
+      if (artistCount >= artistCap) continue;
+
+      chosen.push(track);
+      chosenKeys.add(trackKey);
+      artistCounts.set(artistKey, artistCount + 1);
+    }
+  };
+
+  addWithArtistCap(1);
+  if (chosen.length < desiredCount) addWithArtistCap(2);
+  if (chosen.length < desiredCount) addWithArtistCap(3);
+  if (chosen.length < desiredCount) addWithArtistCap(5);
+
+  if (chosen.length < desiredCount) {
+    for (const track of tracks) {
+      if (chosen.length >= desiredCount) break;
+      const trackKey = getTrackKey(track);
+      if (!trackKey || chosenKeys.has(trackKey)) continue;
+      chosen.push(track);
+      chosenKeys.add(trackKey);
+    }
+  }
+
+  return chosen.length > 0 ? chosen : tracks;
+}
+
 function staggerArtistsForFlow(tracks: Track[]): Track[] {
   if (tracks.length < 3) return tracks;
 
@@ -4118,7 +4169,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         if (!studioBackfillWindow.allowed) {
           truth.studio_sync = {
             studio: studioName,
-            source: 'discogs',
+            source: 'hybrid',
             attempted: false,
             imported: 0,
             inserted_evidence: 0,
@@ -4143,12 +4194,14 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
             );
             truth.studio_sync = {
               studio: studioBackfillResult.studioName,
-              source: 'discogs',
+              source: studioBackfillResult.source,
               attempted: studioBackfillResult.attempted,
               imported: studioBackfillResult.imported,
               inserted_evidence: studioBackfillResult.insertedEvidence,
               discogs_label_id: studioBackfillResult.discogsLabelId,
               discogs_label_source: studioBackfillResult.discogsLabelSource,
+              musicbrainz_place_id: studioBackfillResult.musicBrainzPlaceId,
+              musicbrainz_place_name: studioBackfillResult.musicBrainzPlaceName,
               skipped_reason: studioBackfillResult.skippedReason,
             };
 
@@ -4165,7 +4218,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
               : `error:${message.slice(0, 120)}`;
             truth.studio_sync = {
               studio: studioName,
-              source: 'discogs',
+              source: 'hybrid',
               attempted: false,
               imported: 0,
               inserted_evidence: 0,
@@ -4179,7 +4232,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       } else {
         truth.studio_sync = {
           studio: studioName,
-          source: 'discogs',
+          source: 'hybrid',
           attempted: false,
           imported: 0,
           inserted_evidence: 0,
@@ -4530,9 +4583,10 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   if (constraint?.kind === 'studio') {
     const preferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
     playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
-    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, preferredStudioArtists);
     playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
     playlist.tracks = applyStudioCuratedTrackWhitelist(constraint, playlist.tracks);
+    playlist.tracks = applyStudioArtistDiversity(playlist.tracks);
+    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, preferredStudioArtists);
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
 
@@ -4616,40 +4670,66 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   }
 
   // Store with translated prompt
-  const rawTags = await generateTags(translatedPrompt);
-  const tags = canonicalizeGeneratedTags(rawTags);
-  const locations = await generateLocationMetadata(translatedPrompt);
-  const promptStudios: string[] = [];
-  const promptVenues: string[] = [];
-  const extractedPlace = extractPlaceEntityFromPrompt(translatedPrompt);
-  if (extractedPlace && isValidPlaceEntityName(extractedPlace)) {
-    const heuristicType = inferPlaceTypeHeuristic(extractedPlace);
-    const placeType = heuristicType === 'unknown'
-      ? await classifyPlaceEntity(extractedPlace)
-      : heuristicType;
-    if (placeType === 'studio') {
-      promptStudios.push(extractedPlace);
-    } else if (placeType === 'venue') {
-      promptVenues.push(extractedPlace);
+  let tags: string[] = [];
+  let mergedLocations: { countries: string[]; cities: string[]; studios: string[]; venues: string[] } = {
+    countries: [],
+    cities: [],
+    studios: [],
+    venues: [],
+  };
+  let scenes: string[] = [];
+  let influences: InfluenceEdge[] = [];
+  let generatedCredits: CreditEntity[] = [];
+  let equipment: EquipmentEntity[] = [];
+  let memberships: MembershipEntity[] = [];
+
+  if (constraint?.kind === 'studio') {
+    tags = canonicalizeGeneratedTags(['studio-evidence', 'recorded-at', 'studio']);
+    const studioNames = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+      ? dedupeStudiosByCanonical(constraint.studioAcceptedNames)
+      : [constraint.value].filter(Boolean);
+    mergedLocations = {
+      countries: [],
+      cities: [],
+      studios: studioNames.slice(0, 3),
+      venues: [],
+    };
+  } else {
+    const rawTags = await generateTags(translatedPrompt);
+    tags = canonicalizeGeneratedTags(rawTags);
+    const locations = await generateLocationMetadata(translatedPrompt);
+    const promptStudios: string[] = [];
+    const promptVenues: string[] = [];
+    const extractedPlace = extractPlaceEntityFromPrompt(translatedPrompt);
+    if (extractedPlace && isValidPlaceEntityName(extractedPlace)) {
+      const heuristicType = inferPlaceTypeHeuristic(extractedPlace);
+      const placeType = heuristicType === 'unknown'
+        ? await classifyPlaceEntity(extractedPlace)
+        : heuristicType;
+      if (placeType === 'studio') {
+        promptStudios.push(extractedPlace);
+      } else if (placeType === 'venue') {
+        promptVenues.push(extractedPlace);
+      }
     }
+    const mergedStudios = hasStudioIntent(translatedPrompt)
+      ? dedupeStudiosByCanonical([...locations.studios, ...promptStudios]).slice(0, 3)
+      : [];
+    const mergedVenues = Array.from(new Set([...locations.venues, ...promptVenues])).slice(0, 3);
+    mergedLocations = { ...locations, studios: mergedStudios, venues: mergedVenues };
+    const generatedScenes = await generateScenes(translatedPrompt);
+    scenes = constraint?.kind === 'credit'
+      ? []
+      : await bootstrapScenesFromTracks(translatedPrompt, playlist.tracks, generatedScenes);
+    influences = constraint?.kind === 'credit'
+      ? []
+      : await generateInfluences(translatedPrompt, playlist.tracks);
+    generatedCredits = constraint?.kind === 'credit'
+      ? []
+      : await generateCredits(translatedPrompt, playlist.tracks);
+    equipment = await generateEquipment(translatedPrompt, playlist.tracks);
+    memberships = await generateArtistMemberships(translatedPrompt, playlist.tracks);
   }
-  const mergedStudios = hasStudioIntent(translatedPrompt)
-    ? dedupeStudiosByCanonical([...locations.studios, ...promptStudios]).slice(0, 3)
-    : [];
-  const mergedVenues = Array.from(new Set([...locations.venues, ...promptVenues])).slice(0, 3);
-  const mergedLocations = { ...locations, studios: mergedStudios, venues: mergedVenues };
-  const generatedScenes = await generateScenes(translatedPrompt);
-  const scenes = constraint?.kind === 'credit'
-    ? []
-    : await bootstrapScenesFromTracks(translatedPrompt, playlist.tracks, generatedScenes);
-  const influences = constraint?.kind === 'credit'
-    ? []
-    : await generateInfluences(translatedPrompt, playlist.tracks);
-  const generatedCredits = constraint?.kind === 'credit'
-    ? []
-    : await generateCredits(translatedPrompt, playlist.tracks);
-  const equipment = await generateEquipment(translatedPrompt, playlist.tracks);
-  const memberships = await generateArtistMemberships(translatedPrompt, playlist.tracks);
   const truthRoutePersistedCredits = constraint?.kind === 'credit'
     && typeof constraint.value === 'string'
     && constraint.value.trim().length > 0
@@ -4670,10 +4750,10 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     ? truthRoutePersistedCredits
     : mixedPromptPersistedCredits;
   console.log('[Gemini] Generated tags:', tags);
-  console.log('[Gemini] Generated countries:', locations.countries);
-  console.log('[Gemini] Generated cities:', locations.cities);
+  console.log('[Gemini] Generated countries:', mergedLocations.countries);
+  console.log('[Gemini] Generated cities:', mergedLocations.cities);
   console.log('[Gemini] Generated studios:', mergedLocations.studios);
-  console.log('[Gemini] Generated venues:', locations.venues);
+  console.log('[Gemini] Generated venues:', mergedLocations.venues);
   console.log('[Gemini] Generated scenes:', scenes);
   console.log('[Gemini] Generated influences:', influences);
   console.log('[Gemini] Generated credits:', generatedCredits);

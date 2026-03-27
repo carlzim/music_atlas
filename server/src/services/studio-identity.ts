@@ -6,6 +6,7 @@ export interface StudioIdentity {
   aliases: string[];
   successorNames: string[];
   discogsLabelId?: number;
+  musicBrainzPlaceId?: string;
   preferredArtists?: string[];
   activeStartYear?: number;
   activeEndYear?: number;
@@ -46,6 +47,19 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
     ],
     successorNames: [],
     discogsLabelId: 29092,
+    musicBrainzPlaceId: 'b7a2fdd6-0d78-463a-ba46-8514945d5f4d',
+    preferredArtists: [
+      'Kate Bush',
+      'Elton John',
+      'The Police',
+      'Dire Straits',
+      'Duran Duran',
+      'Mike Oldfield',
+      'Paul McCartney',
+      'George Michael',
+      'Phil Collins',
+      'Peter Gabriel',
+    ],
   },
   {
     key: 'gold_star_studios_los_angeles',
@@ -58,6 +72,20 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
     ],
     successorNames: [],
     discogsLabelId: 263247,
+    musicBrainzPlaceId: 'd1338bbb-12bb-44e9-810b-6e473ceda061',
+    preferredArtists: [
+      'The Ronettes',
+      'The Crystals',
+      'The Righteous Brothers',
+      'Darlene Love',
+      'The Beach Boys',
+      'Ike & Tina Turner',
+      'Sonny & Cher',
+      'Herb Alpert & The Tijuana Brass',
+      'Buffalo Springfield',
+      'Cher',
+      'Ritchie Valens',
+    ],
   },
   {
     key: 'polar_studios_stockholm',
@@ -70,6 +98,7 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
       'Polar Studios Stockholm',
     ],
     successorNames: [],
+    musicBrainzPlaceId: '2288e333-936b-4516-bdea-274934476caa',
     preferredArtists: [
       'ABBA',
       'Led Zeppelin',
@@ -157,6 +186,7 @@ export interface ResolvedStudioIdentity {
   acceptedStudioNames: string[];
   excludedSuccessorNames: string[];
   discogsLabelId?: number;
+  musicBrainzPlaceId?: string;
   preferredArtists: string[];
   activeStartYear?: number;
   activeEndYear?: number;
@@ -170,6 +200,7 @@ function toResolvedStudioIdentity(compiled: CompiledStudioIdentity): ResolvedStu
     acceptedStudioNames: [compiled.identity.primaryName, ...compiled.identity.aliases],
     excludedSuccessorNames: [...compiled.identity.successorNames],
     discogsLabelId: compiled.identity.discogsLabelId,
+    musicBrainzPlaceId: compiled.identity.musicBrainzPlaceId,
     preferredArtists: [...(compiled.identity.preferredArtists || [])],
     activeStartYear: compiled.identity.activeStartYear,
     activeEndYear: compiled.identity.activeEndYear,

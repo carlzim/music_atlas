@@ -3797,6 +3797,8 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   if (constraint && constraint.strength !== 'skip' && verifiedTracks.length < MIN_VERIFIED_TRACKS) {
     if (constraint.kind === 'credit') {
       console.log('[verification] skipped Gemini candidate expansion for credit prompt; using evidence/truth-first flow');
+    } else if (constraint.kind === 'studio') {
+      console.log('[verification] skipped Gemini candidate expansion for studio prompt; prioritizing studio evidence backfill');
     } else {
       for (let attempt = 0; attempt < MAX_EXTRA_ATTEMPTS; attempt += 1) {
         const needed = MIN_VERIFIED_TRACKS - verifiedTracks.length;

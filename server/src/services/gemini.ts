@@ -1125,6 +1125,7 @@ interface PromptConstraint {
   creditRole?: string;
   creditMembersOfBand?: boolean;
   studioIdentityKey?: string;
+  studioDiscogsLabelId?: number;
   studioAcceptedNames?: string[];
   studioExcludedSuccessorNames?: string[];
 }
@@ -1814,6 +1815,7 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         associatedArtists: collectStudioAssociatedArtists(acceptedNames),
         strength: 'medium',
         studioIdentityKey: identityFromPrompt.key,
+        studioDiscogsLabelId: identityFromPrompt.discogsLabelId,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: identityFromPrompt.excludedSuccessorNames,
       };
@@ -1831,6 +1833,7 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         associatedArtists: collectStudioAssociatedArtists(acceptedNames),
         strength: 'medium',
         studioIdentityKey: resolvedIdentity?.key,
+        studioDiscogsLabelId: resolvedIdentity?.discogsLabelId,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: resolvedIdentity?.excludedSuccessorNames,
       };
@@ -1847,6 +1850,7 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         associatedArtists: collectStudioAssociatedArtists(acceptedNames),
         strength: 'medium',
         studioIdentityKey: resolvedIdentity?.key,
+        studioDiscogsLabelId: resolvedIdentity?.discogsLabelId,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: resolvedIdentity?.excludedSuccessorNames,
       };
@@ -3962,6 +3966,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
             attempted: false,
             imported: 0,
             inserted_evidence: 0,
+            discogs_label_id: constraint.studioDiscogsLabelId,
             discogs_label_source: constraint.studioIdentityKey ? 'identity' : undefined,
             skipped_reason: studioBackfillWindow.reason || 'cooldown_active',
           };
@@ -4020,6 +4025,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
               attempted: false,
               imported: 0,
               inserted_evidence: 0,
+              discogs_label_id: constraint.studioDiscogsLabelId,
               discogs_label_source: constraint.studioIdentityKey ? 'identity' : undefined,
               skipped_reason: skippedReason,
             };
@@ -4033,6 +4039,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           attempted: false,
           imported: 0,
           inserted_evidence: 0,
+          discogs_label_id: constraint.studioDiscogsLabelId,
           discogs_label_source: constraint.studioIdentityKey ? 'identity' : undefined,
           skipped_reason: 'disabled',
         };

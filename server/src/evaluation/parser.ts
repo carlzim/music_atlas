@@ -263,6 +263,18 @@ function runPlaceExtractionGoldStarHistoryCase(): ParserCaseResult {
   };
 }
 
+function runPlaceExtractionPolarRecordingsOfCase(): ParserCaseResult {
+  const id = 'place_extract_polar_recordings_of_phrase';
+  const prompt = 'The recordings of Polar studios';
+  const extracted = extractPlaceEntityFromPromptForEval(prompt);
+  const pass = extracted === 'Polar studios';
+  return {
+    id,
+    pass,
+    details: `expected="Polar studios" actual="${extracted || ''}"`,
+  };
+}
+
 function runCoverArtCreditCase(): ParserCaseResult {
   const id = 'credit_detect_cover_art_created_by';
   const prompt = 'Songs from Albums with cover art created by Andy Warhol';
@@ -1000,6 +1012,7 @@ function run(): void {
     runPlaceExtractionEmiStudiosSeventiesSuffixCase(),
     runPlaceExtractionAirStudiosLondonCase(),
     runPlaceExtractionGoldStarHistoryCase(),
+    runPlaceExtractionPolarRecordingsOfCase(),
     runCoverArtCreditCase(),
     runSleeveDesignCreditCase(),
     runArtDirectionCreditCase(),

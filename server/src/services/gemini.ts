@@ -633,6 +633,8 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
     /\b(?:recordings?|songs?|tracks?)\s+at\s+([^.!?,;]+)/i,
     /\b(?:recordings?|songs?|tracks?)\s+in\s+the\s+([^.!?,;]+)/i,
     /\b(?:recordings?|songs?|tracks?)\s+in\s+([^.!?,;]+)/i,
+    /\b(?:recordings?|songs?|tracks?)\s+of\s+the\s+([^.!?,;]+)/i,
+    /\b(?:recordings?|songs?|tracks?)\s+of\s+([^.!?,;]+)/i,
     /\b(?:recordings?|songs?|tracks?)\s+from\s+the\s+([^.!?,;]+)/i,
     /\b(?:recordings?|songs?|tracks?)\s+from\s+([^.!?,;]+)/i,
     /\b(?:recording|studio)\s+history\s+(?:of|at|from)\s+(?:the\s+)?([^.!?,;]+)/i,
@@ -647,6 +649,7 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
     /\barranged by\s+.+?\s+at the\s+([^.!?,;]+)/i,
     /\barranged by\s+.+?\s+at\s+([^.!?,;]+)/i,
     /\b(?:inspelning(?:ar|arna)?|latar|låtar|spar|spår)\s+(?:fran|från)\s+([^.!?,;]+)/i,
+    /\b(?:inspelning(?:ar|arna)?|latar|låtar|spar|spår)\s+av\s+([^.!?,;]+)/i,
     /\b(?:inspelning(?:ar|arna)?|latar|låtar|spar|spår)\s+i\s+([^.!?,;]+)/i,
   ];
   const stopAfter = /\b(?:engineered|produced|arranged|photographed|photography|art direction|cover design|artwork|mixed|mastered|for|with|by|using|featuring|feat\.?|including)\b/i;

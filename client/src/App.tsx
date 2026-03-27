@@ -966,7 +966,9 @@ function HomePage() {
               ? `, studio successors excluded ${truthSummary.studio_constraint.excluded_successor_matches ?? 'n/a'}`
               : ''}
             {truthSummary.studio_sync
-              ? `, studio backfill ${truthSummary.studio_sync.attempted ? `attempted (imported ${truthSummary.studio_sync.imported ?? 0}, inserted ${truthSummary.studio_sync.inserted_evidence ?? 0}${typeof truthSummary.studio_sync.discogs_label_id === 'number' ? `, label ${truthSummary.studio_sync.discogs_label_id}` : ''}${truthSummary.studio_sync.discogs_label_source ? ` via ${truthSummary.studio_sync.discogs_label_source}` : ''})` : humanizeStudioBackfillSkipReason(truthSummary.studio_sync.skipped_reason || '')}`
+              ? `, studio backfill ${truthSummary.studio_sync.attempted
+                ? `attempted (imported ${truthSummary.studio_sync.imported ?? 0}, inserted ${truthSummary.studio_sync.inserted_evidence ?? 0}${typeof truthSummary.studio_sync.discogs_label_id === 'number' ? `, label ${truthSummary.studio_sync.discogs_label_id}` : ''}${truthSummary.studio_sync.discogs_label_source ? ` via ${truthSummary.studio_sync.discogs_label_source}` : ''})`
+                : `${humanizeStudioBackfillSkipReason(truthSummary.studio_sync.skipped_reason || '')}${typeof truthSummary.studio_sync.discogs_label_id === 'number' ? ` (label ${truthSummary.studio_sync.discogs_label_id}${truthSummary.studio_sync.discogs_label_source ? ` via ${truthSummary.studio_sync.discogs_label_source}` : ''})` : truthSummary.studio_sync.discogs_label_source ? ` (via ${truthSummary.studio_sync.discogs_label_source})` : ''}`}`
               : ''}
             {truthSummary.curation?.composition
               ? `, artists ${truthSummary.curation.composition.unique_artists ?? 'n/a'}/${truthSummary.curation.composition.unique_artist_target ?? 'n/a'}, decades ${truthSummary.curation.composition.unique_decades ?? 'n/a'}/${truthSummary.curation.composition.unique_decade_target ?? 'n/a'}, max per artist ${truthSummary.curation.composition.max_tracks_per_artist ?? 'n/a'}`

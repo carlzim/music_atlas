@@ -3408,7 +3408,8 @@ export function setRecordingDurationMs(artist: string, title: string, durationMs
 export function hasRecordingStudioEvidence(
   artist: string,
   title: string,
-  studioName: string
+  studioName: string,
+  trustedOnly = false
 ): boolean {
   const canonicalKey = buildRecordingCanonicalKey(artist, title);
   if (!canonicalKey) return false;
@@ -3417,14 +3418,25 @@ export function hasRecordingStudioEvidence(
   if (!normalizedStudio) return false;
 
   try {
+    const trustedJoinClause = trustedOnly
+      ? 'INNER JOIN playlists p ON p.id = rse.source_playlist_id'
+      : '';
+    const trustedWhereClause = trustedOnly
+      ? 'AND p.prompt LIKE ?'
+      : '';
+    const params: Array<string> = [canonicalKey, normalizedStudio];
+    if (trustedOnly) params.push('[system] studio evidence backfill from discogs ::%');
+
     const row = db.prepare(`
       SELECT 1 AS matched
       FROM recordings r
       INNER JOIN recording_studio_evidence rse ON rse.recording_id = r.id
+      ${trustedJoinClause}
       WHERE r.canonical_key = ?
         AND COALESCE(rse.studio_name_canonical, lower(trim(rse.studio_name))) = ?
+        ${trustedWhereClause}
       LIMIT 1
-    `).get(canonicalKey, normalizedStudio) as { matched: number } | undefined;
+    `).get(...params) as { matched: number } | undefined;
 
     return Boolean(row && row.matched === 1);
   } catch {
@@ -3434,21 +3446,34 @@ export function hasRecordingStudioEvidence(
 
 export function getTracksByRecordingStudioEvidence(
   studioName: string,
-  limit = 120
+  limit = 120,
+  trustedOnly = false
 ): Array<{ artist: string; title: string }> {
   const normalizedStudio = buildStudioCanonicalKey(studioName);
   if (!normalizedStudio) return [];
 
   const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
   try {
+    const trustedJoinClause = trustedOnly
+      ? 'INNER JOIN playlists p ON p.id = rse.source_playlist_id'
+      : '';
+    const trustedWhereClause = trustedOnly
+      ? 'AND p.prompt LIKE ?'
+      : '';
+    const params: Array<string | number> = [normalizedStudio];
+    if (trustedOnly) params.push('[system] studio evidence backfill from discogs ::%');
+    params.push(safeLimit);
+
     const rows = db.prepare(`
       SELECT DISTINCT r.artist AS artist, r.title AS title
       FROM recording_studio_evidence rse
       INNER JOIN recordings r ON r.id = rse.recording_id
+      ${trustedJoinClause}
       WHERE COALESCE(rse.studio_name_canonical, lower(trim(rse.studio_name))) = ?
+      ${trustedWhereClause}
       ORDER BY r.created_at DESC
       LIMIT ?
-    `).all(normalizedStudio, safeLimit) as Array<{ artist?: string; title?: string }>;
+    `).all(...params) as Array<{ artist?: string; title?: string }>;
 
     return rows
       .map((row) => ({

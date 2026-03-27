@@ -865,7 +865,7 @@ function HomePage() {
     error && /not enough verified credit evidence|only\s+\d+\s+strongly verified tracks|no verified\s+.+\s+evidence exists yet/i.test(error)
   );
   const isStudioEvidenceError = Boolean(
-    error && /not enough verified studio evidence|no recording-level studio evidence exists yet|no verified studio tracks matched the requested decade|automatic studio backfill could not load recording-level evidence/i.test(error)
+    error && /not enough verified studio evidence|no recording-level studio evidence exists yet|no verified studio tracks matched the requested decade|automatic studio backfill could not load recording-level evidence|strict studio precision mode found only/i.test(error)
   );
   const detectedCreditRole = detectCreditRoleFromPrompt(prompt);
   const isLikelyCreditPrompt = Boolean(detectedCreditRole);

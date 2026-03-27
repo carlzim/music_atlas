@@ -58,12 +58,19 @@ function getSpotifyChunkFailureCategory(status: number | 'fetch_error', fetchErr
 }
 
 const DEFAULT_PLAYLIST_TIMEOUT_MS = 45000;
+const DEFAULT_STUDIO_PLAYLIST_TIMEOUT_MS = 90000;
 const DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS = 20000;
 const DEFAULT_SPOTIFY_ADD_TRACKS_MAX_ATTEMPTS = 3;
 const DEFAULT_SPOTIFY_ADD_TRACKS_BASE_RETRY_DELAY_MS = 400;
 const DEFAULT_SPOTIFY_ADD_TRACKS_MAX_RETRY_DELAY_MS = 8000;
 
-function getPlaylistTimeoutMs(): number {
+function getPlaylistTimeoutMs(prompt?: string): number {
+  if (isLikelyStudioPrompt(String(prompt || ''))) {
+    const parsedStudio = Number(process.env.STUDIO_PLAYLIST_TIMEOUT_MS || DEFAULT_STUDIO_PLAYLIST_TIMEOUT_MS);
+    if (!Number.isFinite(parsedStudio) || parsedStudio < 15000) return DEFAULT_STUDIO_PLAYLIST_TIMEOUT_MS;
+    return Math.floor(parsedStudio);
+  }
+
   const parsed = Number(process.env.PLAYLIST_TIMEOUT_MS || DEFAULT_PLAYLIST_TIMEOUT_MS);
   if (!Number.isFinite(parsed) || parsed < 10000) return DEFAULT_PLAYLIST_TIMEOUT_MS;
   return Math.floor(parsed);
@@ -94,7 +101,7 @@ function getSpotifyAddTracksMaxRetryDelayMs(): number {
 }
 
 async function generatePlaylistWithTimeout(prompt: string, attempt: number, totalAttempts: number): Promise<Awaited<ReturnType<typeof generatePlaylist>>> {
-  const timeoutMs = getPlaylistTimeoutMs();
+  const timeoutMs = getPlaylistTimeoutMs(prompt);
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   try {
     return await Promise.race([

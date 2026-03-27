@@ -1126,6 +1126,7 @@ interface PromptConstraint {
   creditMembersOfBand?: boolean;
   studioIdentityKey?: string;
   studioDiscogsLabelId?: number;
+  studioPreferredArtists?: string[];
   studioAcceptedNames?: string[];
   studioExcludedSuccessorNames?: string[];
 }
@@ -1674,7 +1675,11 @@ function getStudioTrackVariantPenalty(songTitle: string): number {
   return penalty;
 }
 
-async function rankStudioTracksByRecognition(prompt: string, tracks: Track[]): Promise<Track[]> {
+async function rankStudioTracksByRecognition(
+  prompt: string,
+  tracks: Track[],
+  preferredArtists: Set<string>
+): Promise<Track[]> {
   if (tracks.length <= 1) return tracks;
 
   const scored = await Promise.all(
@@ -1695,7 +1700,8 @@ async function rankStudioTracksByRecognition(prompt: string, tracks: Track[]): P
       }
 
       const variantPenalty = getStudioTrackVariantPenalty(track.song);
-      const finalScore = recognitionScore - variantPenalty;
+      const preferredArtistBoost = preferredArtists.has(normalize(track.artist)) ? 3 : 0;
+      const finalScore = recognitionScore - variantPenalty + preferredArtistBoost;
       return { track, index, finalScore };
     })
   );
@@ -1875,6 +1881,7 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         strength: 'medium',
         studioIdentityKey: identityFromPrompt.key,
         studioDiscogsLabelId: identityFromPrompt.discogsLabelId,
+        studioPreferredArtists: identityFromPrompt.preferredArtists,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: identityFromPrompt.excludedSuccessorNames,
       };
@@ -1893,6 +1900,7 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         strength: 'medium',
         studioIdentityKey: resolvedIdentity?.key,
         studioDiscogsLabelId: resolvedIdentity?.discogsLabelId,
+        studioPreferredArtists: resolvedIdentity?.preferredArtists,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: resolvedIdentity?.excludedSuccessorNames,
       };
@@ -1910,6 +1918,7 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         strength: 'medium',
         studioIdentityKey: resolvedIdentity?.key,
         studioDiscogsLabelId: resolvedIdentity?.discogsLabelId,
+        studioPreferredArtists: resolvedIdentity?.preferredArtists,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: resolvedIdentity?.excludedSuccessorNames,
       };
@@ -4026,11 +4035,14 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         const forceStudioBackfillAttempt = evidenceBeforeStudioBackfill === 0;
         const studioArtistHints = Array.from(
           new Set(
-            candidateTracks
-              .map((track) => canonicalizeDisplayName(track.artist || ''))
+            [
+              ...(constraint.studioPreferredArtists || []),
+              ...candidateTracks.map((track) => canonicalizeDisplayName(track.artist || '')),
+            ]
+              .map((artist) => canonicalizeDisplayName(artist || ''))
               .filter((artist) => artist.length > 0)
           )
-        ).slice(0, 12);
+        ).slice(0, 16);
         const studioBackfillWindow = shouldAttemptStudioAutoBackfill(
           studioName,
           constraint.studioIdentityKey,
@@ -4447,8 +4459,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   }
   const studioVerifiedBeforeDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
   if (constraint?.kind === 'studio') {
+    const preferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
     playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
-    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks);
+    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, preferredStudioArtists);
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
 

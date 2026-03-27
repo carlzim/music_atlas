@@ -6,6 +6,7 @@ export interface StudioIdentity {
   aliases: string[];
   successorNames: string[];
   discogsLabelId?: number;
+  preferredArtists?: string[];
 }
 
 const STUDIO_IDENTITIES: StudioIdentity[] = [
@@ -66,6 +67,15 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
       'Polar Studios Stockholm',
     ],
     successorNames: [],
+    preferredArtists: [
+      'ABBA',
+      'Led Zeppelin',
+      'Genesis',
+      'Roxy Music',
+      'The Ramones',
+      'Frida',
+      'Agnetha Faltskog',
+    ],
   },
 ];
 
@@ -129,6 +139,7 @@ export interface ResolvedStudioIdentity {
   acceptedStudioNames: string[];
   excludedSuccessorNames: string[];
   discogsLabelId?: number;
+  preferredArtists: string[];
 }
 
 function toResolvedStudioIdentity(compiled: CompiledStudioIdentity): ResolvedStudioIdentity {
@@ -138,6 +149,7 @@ function toResolvedStudioIdentity(compiled: CompiledStudioIdentity): ResolvedStu
     acceptedStudioNames: [compiled.identity.primaryName, ...compiled.identity.aliases],
     excludedSuccessorNames: [...compiled.identity.successorNames],
     discogsLabelId: compiled.identity.discogsLabelId,
+    preferredArtists: [...(compiled.identity.preferredArtists || [])],
   };
 }
 

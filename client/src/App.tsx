@@ -268,6 +268,12 @@ function humanizeStudioBackfillSkipReason(reason: string): string {
   return `Studio backfill skipped: ${trimmed}`;
 }
 
+function getPlaylistRequestTimeoutMs(): number {
+  const raw = Number((import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_PLAYLIST_REQUEST_TIMEOUT_MS || '90000');
+  if (!Number.isFinite(raw) || raw < 30000) return 90000;
+  return Math.floor(raw);
+}
+
 function detectCreditRoleFromPrompt(prompt: string): PromptCreditRole | null {
   const value = prompt.trim();
   if (!value) return null;
@@ -690,7 +696,8 @@ function HomePage() {
     setVerification(null);
     setTruthSummary(null);
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 45000);
+    const requestTimeoutMs = getPlaylistRequestTimeoutMs();
+    const timeoutId = window.setTimeout(() => controller.abort(), requestTimeoutMs);
 
     try {
       const response = await fetch('/api/playlist', {
@@ -732,7 +739,8 @@ function HomePage() {
       setVerification(null);
       setTruthSummary(null);
       if (err instanceof DOMException && err.name === 'AbortError') {
-        setError('Request timed out after 45s. Try a narrower prompt or run backfill first.');
+        const timeoutSeconds = Math.round(requestTimeoutMs / 1000);
+        setError(`Request timed out after ${timeoutSeconds}s. Automatic studio backfill may still be running—retry now.`);
       } else {
         setError(err instanceof Error ? err.message : 'An error occurred');
       }

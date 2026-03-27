@@ -22,6 +22,12 @@ interface PromptRequest {
   prompt: string;
 }
 
+function isLikelyStudioPrompt(prompt: string): boolean {
+  const value = String(prompt || '').trim().toLowerCase();
+  if (!value) return false;
+  return /\b(?:studio|studios|studion|studior|studiorna)\b|\brecorded\s+(?:at|in)\b|\btracked\s+(?:at|in)\b|\bcut\s+(?:at|in)\b|\binspelning(?:ar|arna)?\b/.test(value);
+}
+
 function isTransientPlaylistError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error || '').toLowerCase();
   return message.includes('503')
@@ -87,7 +93,7 @@ function getSpotifyAddTracksMaxRetryDelayMs(): number {
   return Math.floor(parsed);
 }
 
-async function generatePlaylistWithTimeout(prompt: string, attempt: number): Promise<Awaited<ReturnType<typeof generatePlaylist>>> {
+async function generatePlaylistWithTimeout(prompt: string, attempt: number, totalAttempts: number): Promise<Awaited<ReturnType<typeof generatePlaylist>>> {
   const timeoutMs = getPlaylistTimeoutMs();
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   try {
@@ -95,7 +101,7 @@ async function generatePlaylistWithTimeout(prompt: string, attempt: number): Pro
       generatePlaylist(prompt),
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
-          reject(new Error(`Playlist generation timed out after ${timeoutMs}ms (attempt ${attempt}/3)`));
+          reject(new Error(`Playlist generation timed out after ${timeoutMs}ms (attempt ${attempt}/${totalAttempts})`));
         }, timeoutMs);
       }),
     ]);
@@ -403,20 +409,22 @@ app.post('/api/playlist', async (req, res) => {
 
   try {
     console.log('Generating playlist for:', prompt);
+    const totalAttempts = isLikelyStudioPrompt(prompt) ? 1 : 3;
     let result: Awaited<ReturnType<typeof generatePlaylist>>;
     try {
-      result = await generatePlaylistWithTimeout(prompt, 1);
+      result = await generatePlaylistWithTimeout(prompt, 1, totalAttempts);
     } catch (firstError) {
+      if (totalAttempts <= 1) throw firstError;
       if (!isTransientPlaylistError(firstError)) throw firstError;
       console.log('[api] transient playlist generation error, retrying (attempt 2/3)');
       await sleep(1200);
       try {
-        result = await generatePlaylistWithTimeout(prompt, 2);
+        result = await generatePlaylistWithTimeout(prompt, 2, totalAttempts);
       } catch (secondError) {
         if (!isTransientPlaylistError(secondError)) throw secondError;
         console.log('[api] transient playlist generation error, retrying (attempt 3/3)');
         await sleep(2500);
-        result = await generatePlaylistWithTimeout(prompt, 3);
+        result = await generatePlaylistWithTimeout(prompt, 3, totalAttempts);
       }
     }
     console.log('Playlist generated, cached:', result.cached);

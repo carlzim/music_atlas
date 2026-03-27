@@ -214,9 +214,9 @@ const STUDIO_AUTO_BACKFILL_COOLDOWN_MS = Math.max(
 );
 const STUDIO_AUTO_BACKFILL_TIMEOUT_MS = Math.max(
   1000,
-  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '30000'))
-    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '30000')
-    : 30000
+  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '60000'))
+    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '60000')
+    : 60000
 );
 const lastAutoBackfillByCredit = new Map<string, number>();
 const lastAutoBackfillByStudio = new Map<string, number>();
@@ -1128,6 +1128,9 @@ interface PromptConstraint {
   studioIdentityKey?: string;
   studioDiscogsLabelId?: number;
   studioPreferredArtists?: string[];
+  studioActiveStartYear?: number;
+  studioActiveEndYear?: number;
+  studioCuratedTracks?: Array<{ artist: string; title: string }>;
   studioAcceptedNames?: string[];
   studioExcludedSuccessorNames?: string[];
 }
@@ -1715,6 +1718,60 @@ async function rankStudioTracksByRecognition(
   return scored.map((row) => row.track);
 }
 
+function applyStudioIdentityYearBounds(constraint: PromptConstraint, tracks: Track[]): Track[] {
+  const minYear = typeof constraint.studioActiveStartYear === 'number' ? constraint.studioActiveStartYear : null;
+  const maxYear = typeof constraint.studioActiveEndYear === 'number' ? constraint.studioActiveEndYear : null;
+  if (minYear === null && maxYear === null) return tracks;
+
+  return tracks.filter((track) => {
+    const year = typeof track.release_year === 'number' && Number.isFinite(track.release_year)
+      ? Math.floor(track.release_year)
+      : null;
+    if (year === null) return true;
+    if (minYear !== null && year < minYear) return false;
+    if (maxYear !== null && year > maxYear) return false;
+    return true;
+  });
+}
+
+function buildTrackMatchKey(artist: string, title: string): string {
+  return `${normalize(artist)}::${normalize(title.replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' '))}`;
+}
+
+function getPolarCuratedTrackFallback(): Array<{ artist: string; title: string }> {
+  return [
+    { artist: 'ABBA', title: 'Voulez-Vous' },
+    { artist: 'ABBA', title: 'The Winner Takes It All' },
+    { artist: 'ABBA', title: 'Super Trouper' },
+    { artist: 'ABBA', title: 'One Of Us' },
+    { artist: 'ABBA', title: 'The Day Before You Came' },
+    { artist: 'Led Zeppelin', title: 'In the Evening' },
+    { artist: 'Led Zeppelin', title: 'Fool in the Rain' },
+    { artist: 'Led Zeppelin', title: 'All My Love' },
+    { artist: 'Led Zeppelin', title: 'Carouselambra' },
+    { artist: 'Genesis', title: 'Turn It On Again' },
+    { artist: 'Genesis', title: 'Duchess' },
+    { artist: 'Genesis', title: 'Misunderstanding' },
+  ];
+}
+
+function applyStudioCuratedTrackWhitelist(constraint: PromptConstraint, tracks: Track[]): Track[] {
+  let curated = Array.isArray(constraint.studioCuratedTracks) ? constraint.studioCuratedTracks : [];
+  if (curated.length === 0 && /\bpolar\s+studios?\b/i.test(constraint.value || '')) {
+    curated = getPolarCuratedTrackFallback();
+  }
+  if (curated.length === 0) return tracks;
+
+  const allowedKeys = new Set(
+    curated
+      .map((row) => buildTrackMatchKey(row.artist || '', row.title || ''))
+      .filter((value) => value.length > 4)
+  );
+  if (allowedKeys.size === 0) return tracks;
+
+  return tracks.filter((track) => allowedKeys.has(buildTrackMatchKey(track.artist, track.song)));
+}
+
 function dedupeStudiosByCanonical(studios: string[]): string[] {
   const deduped = new Map<string, string>();
   for (const raw of studios) {
@@ -1883,6 +1940,9 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         studioIdentityKey: identityFromPrompt.key,
         studioDiscogsLabelId: identityFromPrompt.discogsLabelId,
         studioPreferredArtists: identityFromPrompt.preferredArtists,
+        studioActiveStartYear: identityFromPrompt.activeStartYear,
+        studioActiveEndYear: identityFromPrompt.activeEndYear,
+        studioCuratedTracks: identityFromPrompt.curatedRecordedTracks,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: identityFromPrompt.excludedSuccessorNames,
       };
@@ -1902,6 +1962,9 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         studioIdentityKey: resolvedIdentity?.key,
         studioDiscogsLabelId: resolvedIdentity?.discogsLabelId,
         studioPreferredArtists: resolvedIdentity?.preferredArtists,
+        studioActiveStartYear: resolvedIdentity?.activeStartYear,
+        studioActiveEndYear: resolvedIdentity?.activeEndYear,
+        studioCuratedTracks: resolvedIdentity?.curatedRecordedTracks,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: resolvedIdentity?.excludedSuccessorNames,
       };
@@ -1920,6 +1983,9 @@ function detectPromptConstraint(prompt: string): PromptConstraint | null {
         studioIdentityKey: resolvedIdentity?.key,
         studioDiscogsLabelId: resolvedIdentity?.discogsLabelId,
         studioPreferredArtists: resolvedIdentity?.preferredArtists,
+        studioActiveStartYear: resolvedIdentity?.activeStartYear,
+        studioActiveEndYear: resolvedIdentity?.activeEndYear,
+        studioCuratedTracks: resolvedIdentity?.curatedRecordedTracks,
         studioAcceptedNames: acceptedNames,
         studioExcludedSuccessorNames: resolvedIdentity?.excludedSuccessorNames,
       };
@@ -4043,7 +4109,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
               .map((artist) => canonicalizeDisplayName(artist || ''))
               .filter((artist) => artist.length > 0)
           )
-        ).slice(0, 16);
+        ).slice(0, 8);
         const studioBackfillWindow = shouldAttemptStudioAutoBackfill(
           studioName,
           constraint.studioIdentityKey,
@@ -4068,7 +4134,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
                 studioName,
                 prompt: translatedPrompt,
                 artistHints: studioArtistHints,
-                limit: 80,
+                activeStartYear: constraint.studioActiveStartYear,
+                activeEndYear: constraint.studioActiveEndYear,
+                limit: 50,
               }),
               STUDIO_AUTO_BACKFILL_TIMEOUT_MS,
               'studio_backfill_timeout'
@@ -4455,7 +4523,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   }
 
   playlist.tracks = constraint ? verifiedTracks : candidateTracks;
-  if (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit')) {
+  if (!constraint || (constraint.kind !== 'artist' && constraint.kind !== 'credit' && constraint.kind !== 'studio')) {
     playlist.tracks = applyGeneralArtistDiversity(playlist.tracks);
   }
   const studioVerifiedBeforeDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
@@ -4463,6 +4531,8 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const preferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
     playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
     playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, preferredStudioArtists);
+    playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
+    playlist.tracks = applyStudioCuratedTrackWhitelist(constraint, playlist.tracks);
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
 

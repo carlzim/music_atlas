@@ -4,7 +4,7 @@ import {
   getPlaylistByPrompt,
   savePlaylist,
 } from './db.js';
-import { fetchDiscogsStudioTracksByArtistHints, fetchDiscogsStudioTracksByLabel, isDiscogsConfigured, searchDiscogsStudioLabelId } from './discogs.js';
+import { fetchDiscogsStudioTracksByArtistCatalog, fetchDiscogsStudioTracksByArtistHints, fetchDiscogsStudioTracksByLabel, isDiscogsConfigured, searchDiscogsStudioLabelId } from './discogs.js';
 import { buildStudioCanonicalKey, canonicalizeDisplayName } from './normalize.js';
 import { resolveStudioIdentity, resolveStudioIdentityFromPrompt } from './studio-identity.js';
 
@@ -12,6 +12,9 @@ export interface StudioEvidenceBackfillParams {
   studioName: string;
   prompt?: string;
   artistHints?: string[];
+  activeStartYear?: number;
+  activeEndYear?: number;
+  curatedRecordedTracks?: Array<{ artist: string; title: string }>;
   limit?: number;
 }
 
@@ -143,13 +146,15 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   }
 
   const sourcePlaylistId = ensureSourcePlaylistId(studioName);
-  let discogsTracks = await fetchDiscogsStudioTracksByLabel(discogsLabelId, studioName, limit);
+  const activeStartYear = typeof params.activeStartYear === 'number' ? params.activeStartYear : undefined;
+  const activeEndYear = typeof params.activeEndYear === 'number' ? params.activeEndYear : undefined;
+  let discogsTracks = await fetchDiscogsStudioTracksByLabel(discogsLabelId, studioName, limit, activeStartYear, activeEndYear);
   const artistHints = Array.isArray(params.artistHints)
     ? Array.from(new Set(params.artistHints.map((value) => canonicalizeDisplayName(value || '')).filter((value) => value.length > 0))).slice(0, 12)
     : [];
   if (artistHints.length > 0) {
     const fallbackLimit = Math.max(30, Math.min(limit, 100));
-    const fallbackTracks = await fetchDiscogsStudioTracksByArtistHints(studioName, artistHints, fallbackLimit);
+    const fallbackTracks = await fetchDiscogsStudioTracksByArtistHints(studioName, artistHints, fallbackLimit, activeStartYear, activeEndYear);
     const dedupeKeys = new Set<string>();
     const merged: typeof discogsTracks = [];
     for (const row of [...fallbackTracks, ...discogsTracks]) {
@@ -160,6 +165,55 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
       if (merged.length >= limit) break;
     }
     discogsTracks = merged;
+  }
+  if (discogsTracks.length < Math.min(30, limit) && artistHints.length > 0) {
+    const catalogTracks = await fetchDiscogsStudioTracksByArtistCatalog(studioName, artistHints, Math.max(30, Math.min(limit, 100)), activeStartYear, activeEndYear);
+    const dedupeKeys = new Set<string>();
+    const merged: typeof discogsTracks = [];
+    for (const row of [...catalogTracks, ...discogsTracks]) {
+      const key = `${row.artist.toLowerCase()}::${row.title.toLowerCase()}::${row.releaseId}`;
+      if (dedupeKeys.has(key)) continue;
+      dedupeKeys.add(key);
+      merged.push(row);
+      if (merged.length >= limit) break;
+    }
+    discogsTracks = merged;
+  }
+
+  const curatedRecordedTracks = Array.isArray(params.curatedRecordedTracks)
+    ? params.curatedRecordedTracks
+    : Array.isArray(resolved?.curatedRecordedTracks)
+      ? resolved.curatedRecordedTracks
+      : [];
+  if (curatedRecordedTracks.length > 0) {
+    const dedupeKeys = new Set<string>();
+    const merged: typeof discogsTracks = [];
+    let syntheticReleaseId = 1;
+    for (const curated of curatedRecordedTracks) {
+      const artist = canonicalizeDisplayName(curated.artist || '');
+      const title = (curated.title || '').trim();
+      if (!artist || !title) continue;
+      const key = `${artist.toLowerCase()}::${title.toLowerCase()}`;
+      if (dedupeKeys.has(key)) continue;
+      dedupeKeys.add(key);
+      merged.unshift({
+        artist,
+        title,
+        studioName,
+        releaseId: syntheticReleaseId,
+        releaseTitle: 'Curated studio recording seed',
+        sourceRef: `curated:studio:${studioIdentityKey || buildStudioCanonicalKey(studioName)}:${syntheticReleaseId}`,
+      });
+      syntheticReleaseId += 1;
+    }
+    for (const row of discogsTracks) {
+      const key = `${row.artist.toLowerCase()}::${row.title.toLowerCase()}`;
+      if (dedupeKeys.has(key)) continue;
+      dedupeKeys.add(key);
+      merged.push(row);
+      if (merged.length >= limit) break;
+    }
+    discogsTracks = merged.slice(0, limit);
   }
   if (discogsTracks.length === 0) {
     return {

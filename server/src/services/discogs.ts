@@ -419,17 +419,29 @@ function buildDiscogsStudioTracksFromRelease(
     artists?: unknown[];
     companies?: unknown[];
     notes?: unknown;
+    year?: unknown;
     tracklist?: unknown[];
   },
   targetStudio: string,
   sourceRefPrefix: string,
   releaseScore: number,
-  dedupe: Set<string>
+  dedupe: Set<string>,
+  minYear?: number,
+  maxYear?: number
 ): RankedDiscogsStudioTrack[] {
   if (!hasRecordedStudioEvidenceInRelease(releaseRaw, targetStudio)) return [];
 
   const releaseTitle = typeof releaseRaw.title === 'string' ? releaseRaw.title.trim() : '';
   const releaseArtists = extractReleaseArtists(releaseRaw.artists);
+  const releaseYear = typeof releaseRaw.year === 'number' && Number.isFinite(releaseRaw.year)
+    ? Math.floor(releaseRaw.year)
+    : Number.isFinite(Number(releaseRaw.year || 0))
+      ? Math.floor(Number(releaseRaw.year || 0))
+      : null;
+  if (releaseYear !== null) {
+    if (typeof minYear === 'number' && releaseYear < minYear) return [];
+    if (typeof maxYear === 'number' && releaseYear > maxYear) return [];
+  }
   if (isCompilationLikeRelease(releaseTitle, releaseArtists)) return [];
   const tracks: RankedDiscogsStudioTrack[] = [];
   const tracklist = Array.isArray(releaseRaw.tracklist) ? releaseRaw.tracklist : [];
@@ -507,7 +519,9 @@ function hasRecordedStudioEvidenceInRelease(releaseRaw: {
 export async function fetchDiscogsStudioTracksByLabel(
   labelId: number,
   targetStudioName: string,
-  limit = 120
+  limit = 120,
+  minYear?: number,
+  maxYear?: number
 ): Promise<DiscogsStudioTrack[]> {
   const safeLabelId = Math.floor(Number(labelId));
   const targetStudio = targetStudioName.trim();
@@ -557,6 +571,7 @@ export async function fetchDiscogsStudioTracksByLabel(
       artists?: unknown[];
       companies?: unknown[];
       notes?: unknown;
+      year?: unknown;
       tracklist?: unknown[];
     };
     const releaseCommunityScore = releaseCandidates.get(releaseId) || 0;
@@ -566,7 +581,9 @@ export async function fetchDiscogsStudioTracksByLabel(
       targetStudio,
       `discogs:label:${safeLabelId}:release:`,
       releaseCommunityScore,
-      dedupe
+      dedupe,
+      minYear,
+      maxYear
     );
     output.push(...releaseTracks);
   }
@@ -580,18 +597,20 @@ export async function fetchDiscogsStudioTracksByLabel(
 export async function fetchDiscogsStudioTracksByArtistHints(
   targetStudioName: string,
   artistHints: string[],
-  limit = 120
+  limit = 120,
+  minYear?: number,
+  maxYear?: number
 ): Promise<DiscogsStudioTrack[]> {
   const targetStudio = targetStudioName.trim();
   if (!targetStudio || !Array.isArray(artistHints) || artistHints.length === 0) return [];
 
   const safeLimit = Math.max(1, Math.min(400, Math.floor(limit)));
   const releaseCandidates = new Map<number, number>();
-  const hints = Array.from(new Set(artistHints.map((value) => value.trim()).filter(Boolean))).slice(0, 10);
+  const hints = Array.from(new Set(artistHints.map((value) => value.trim()).filter(Boolean))).slice(0, 6);
 
   for (const artistHint of hints) {
     const query = `${artistHint} ${targetStudio}`.trim();
-    const url = `${DISCOGS_BASE_URL}/database/search?type=release&q=${encodeURIComponent(query)}&per_page=12`;
+    const url = `${DISCOGS_BASE_URL}/database/search?type=release&q=${encodeURIComponent(query)}&per_page=8`;
     const raw = await rateLimitedDiscogsFetch(url) as { results?: unknown[] };
     const results = Array.isArray(raw.results) ? raw.results : [];
 
@@ -628,6 +647,7 @@ export async function fetchDiscogsStudioTracksByArtistHints(
       artists?: unknown[];
       companies?: unknown[];
       notes?: unknown;
+      year?: unknown;
       tracklist?: unknown[];
     };
 
@@ -638,7 +658,86 @@ export async function fetchDiscogsStudioTracksByArtistHints(
       targetStudio,
       'discogs:search:release:',
       releaseScore,
-      dedupe
+      dedupe,
+      minYear,
+      maxYear
+    );
+    output.push(...releaseTracks);
+    if (output.length >= safeLimit * 2) break;
+  }
+
+  return output
+    .sort((a, b) => b._rank - a._rank)
+    .slice(0, safeLimit)
+    .map(({ _rank, ...row }) => row);
+}
+
+export async function fetchDiscogsStudioTracksByArtistCatalog(
+  targetStudioName: string,
+  artistHints: string[],
+  limit = 120,
+  minYear?: number,
+  maxYear?: number
+): Promise<DiscogsStudioTrack[]> {
+  const targetStudio = targetStudioName.trim();
+  if (!targetStudio || !Array.isArray(artistHints) || artistHints.length === 0) return [];
+
+  const safeLimit = Math.max(1, Math.min(300, Math.floor(limit)));
+  const releaseCandidates = new Map<number, number>();
+  const hints = Array.from(new Set(artistHints.map((value) => value.trim()).filter(Boolean))).slice(0, 5);
+
+  for (const artistHint of hints) {
+    const url = `${DISCOGS_BASE_URL}/database/search?type=release&q=${encodeURIComponent(artistHint)}&per_page=8`;
+    const raw = await rateLimitedDiscogsFetch(url) as { results?: unknown[] };
+    const results = Array.isArray(raw.results) ? raw.results : [];
+
+    for (const item of results) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as { id?: unknown; type?: unknown; title?: unknown };
+      const type = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+      if (type && type !== 'release') continue;
+
+      const id = typeof row.id === 'number' ? row.id : Number(row.id || 0);
+      if (!Number.isFinite(id) || id <= 0) continue;
+
+      const baseScore = getDiscogsReleaseCommunityScore(item);
+      const title = typeof row.title === 'string' ? row.title.toLowerCase() : '';
+      const artistBoost = title.includes(artistHint.toLowerCase()) ? 20 : 0;
+      const existingScore = releaseCandidates.get(id) || 0;
+      const nextScore = baseScore + artistBoost;
+      if (nextScore > existingScore) releaseCandidates.set(id, nextScore);
+      if (releaseCandidates.size >= safeLimit * 3) break;
+    }
+  }
+
+  const releaseIds = Array.from(releaseCandidates.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, Math.min(getDiscogsStudioMaxReleaseFetches(), safeLimit))
+    .map(([id]) => id);
+
+  const output: RankedDiscogsStudioTrack[] = [];
+  const dedupe = new Set<string>();
+  for (const releaseId of releaseIds) {
+    const releaseUrl = `${DISCOGS_BASE_URL}/releases/${releaseId}`;
+    const releaseRaw = await rateLimitedDiscogsFetch(releaseUrl) as {
+      title?: unknown;
+      artists?: unknown[];
+      companies?: unknown[];
+      notes?: unknown;
+      year?: unknown;
+      tracklist?: unknown[];
+    };
+
+    const releaseScore = releaseCandidates.get(releaseId) || 0;
+    const releaseTracks = buildDiscogsStudioTracksFromRelease(
+      releaseId,
+      releaseRaw,
+      targetStudio,
+      'discogs:artist-catalog:release:',
+      releaseScore,
+      dedupe,
+      minYear,
+      maxYear
     );
     output.push(...releaseTracks);
     if (output.length >= safeLimit * 2) break;

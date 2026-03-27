@@ -7,6 +7,9 @@ export interface StudioIdentity {
   successorNames: string[];
   discogsLabelId?: number;
   preferredArtists?: string[];
+  activeStartYear?: number;
+  activeEndYear?: number;
+  curatedRecordedTracks?: Array<{ artist: string; title: string }>;
 }
 
 const STUDIO_IDENTITIES: StudioIdentity[] = [
@@ -76,6 +79,21 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
       'Frida',
       'Agnetha Faltskog',
     ],
+    activeStartYear: 1978,
+    curatedRecordedTracks: [
+      { artist: 'ABBA', title: 'Voulez-Vous' },
+      { artist: 'ABBA', title: 'The Winner Takes It All' },
+      { artist: 'ABBA', title: 'Super Trouper' },
+      { artist: 'ABBA', title: 'One Of Us' },
+      { artist: 'ABBA', title: 'The Day Before You Came' },
+      { artist: 'Led Zeppelin', title: 'In the Evening' },
+      { artist: 'Led Zeppelin', title: 'Fool in the Rain' },
+      { artist: 'Led Zeppelin', title: 'All My Love' },
+      { artist: 'Led Zeppelin', title: 'Carouselambra' },
+      { artist: 'Genesis', title: 'Turn It On Again' },
+      { artist: 'Genesis', title: 'Duchess' },
+      { artist: 'Genesis', title: 'Misunderstanding' },
+    ],
   },
 ];
 
@@ -140,6 +158,9 @@ export interface ResolvedStudioIdentity {
   excludedSuccessorNames: string[];
   discogsLabelId?: number;
   preferredArtists: string[];
+  activeStartYear?: number;
+  activeEndYear?: number;
+  curatedRecordedTracks: Array<{ artist: string; title: string }>;
 }
 
 function toResolvedStudioIdentity(compiled: CompiledStudioIdentity): ResolvedStudioIdentity {
@@ -150,6 +171,9 @@ function toResolvedStudioIdentity(compiled: CompiledStudioIdentity): ResolvedStu
     excludedSuccessorNames: [...compiled.identity.successorNames],
     discogsLabelId: compiled.identity.discogsLabelId,
     preferredArtists: [...(compiled.identity.preferredArtists || [])],
+    activeStartYear: compiled.identity.activeStartYear,
+    activeEndYear: compiled.identity.activeEndYear,
+    curatedRecordedTracks: [...(compiled.identity.curatedRecordedTracks || [])],
   };
 }
 

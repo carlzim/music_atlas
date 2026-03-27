@@ -275,6 +275,18 @@ function runPlaceExtractionPolarRecordingsOfCase(): ParserCaseResult {
   };
 }
 
+function runPlaceExtractionPolarSwedishRecordingsAvCase(): ParserCaseResult {
+  const id = 'place_extract_polar_swedish_recordings_av_phrase';
+  const prompt = 'Inspelningarna av Polarstudion i Stockholm';
+  const extracted = extractPlaceEntityFromPromptForEval(prompt);
+  const pass = extracted === 'Polarstudion';
+  return {
+    id,
+    pass,
+    details: `expected="Polarstudion" actual="${extracted || ''}"`,
+  };
+}
+
 function runCoverArtCreditCase(): ParserCaseResult {
   const id = 'credit_detect_cover_art_created_by';
   const prompt = 'Songs from Albums with cover art created by Andy Warhol';
@@ -1013,6 +1025,7 @@ function run(): void {
     runPlaceExtractionAirStudiosLondonCase(),
     runPlaceExtractionGoldStarHistoryCase(),
     runPlaceExtractionPolarRecordingsOfCase(),
+    runPlaceExtractionPolarSwedishRecordingsAvCase(),
     runCoverArtCreditCase(),
     runSleeveDesignCreditCase(),
     runArtDirectionCreditCase(),

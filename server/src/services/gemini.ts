@@ -3975,6 +3975,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   if (constraint?.kind === 'studio' && verifiedTracks.length < MIN_VERIFIED_TRACKS) {
     const studioName = (constraint.value || '').trim();
     if (studioName) {
+      const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+        ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+        : [studioName];
       const studioBackfillEnabled = process.env.ENABLE_STUDIO_DISCOGS_BACKFILL !== 'false';
       if (studioBackfillEnabled) {
         const evidenceBeforeStudioBackfill = getCombinedStudioEvidenceCount(constraint);
@@ -4024,21 +4027,6 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
             console.log(
               `[truth] studio sync studio="${studioBackfillResult.studioName}" imported=${studioBackfillResult.imported} inserted=${studioBackfillResult.insertedEvidence}${studioBackfillResult.skippedReason ? ` reason=${studioBackfillResult.skippedReason}` : ''}`
             );
-
-            if (studioBackfillResult.insertedEvidence > 0 || studioBackfillResult.imported > 0) {
-              const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
-                ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
-                : [studioBackfillResult.studioName];
-              const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 140))
-                .map((row) => ({
-                  artist: row.artist,
-                  song: row.title,
-                  reason: `Verified recording studio evidence for ${studioBackfillResult.studioName}`,
-                }));
-
-              candidateTracks = dedupeTracks([...studioSeedTracks, ...candidateTracks]);
-              verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
-            }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             const skippedReason = message === 'studio_backfill_timeout'
@@ -4068,6 +4056,18 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           discogs_label_source: constraint.studioIdentityKey ? 'identity' : undefined,
           skipped_reason: 'disabled',
         };
+      }
+
+      const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 180))
+        .map((row) => ({
+          artist: row.artist,
+          song: row.title,
+          reason: `Verified recording studio evidence for ${studioName}`,
+        }));
+
+      if (studioSeedTracks.length > 0) {
+        candidateTracks = dedupeTracks([...studioSeedTracks, ...candidateTracks]);
+        verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
       }
     }
   }

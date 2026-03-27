@@ -1423,6 +1423,24 @@ function normalize(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function normalizeArtistIdentity(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function studioArtistMatchesPreferred(artist: string, preferredArtistKeys: string[]): boolean {
+  const normalizedArtist = normalizeArtistIdentity(artist);
+  if (!normalizedArtist || preferredArtistKeys.length === 0) return false;
+  return preferredArtistKeys.some((preferred) => normalizedArtist === preferred || normalizedArtist.includes(preferred));
+}
+
 function foldForCreditEvidenceMatch(value: string): string {
   return value
     .normalize('NFD')
@@ -1706,18 +1724,22 @@ async function rankStudioTracksByRecognition(
   if (tracks.length <= 1) return tracks;
 
   const mainstreamPrompt = /\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/i.test(_prompt);
+  const preferredArtistKeys = Array.from(preferredArtists)
+    .map((value) => normalizeArtistIdentity(value))
+    .filter((value) => value.length > 0);
 
   const scored = tracks.map((track, index) => {
     const variantPenalty = getStudioTrackVariantPenalty(track.song);
     const commercialPenalty = getStudioTrackCommercialPenalty(track.artist, track.song);
-    const preferredArtistBoost = preferredArtists.has(normalize(track.artist))
+    const matchesPreferredArtist = studioArtistMatchesPreferred(track.artist, preferredArtistKeys);
+    const preferredArtistBoost = matchesPreferredArtist
       ? (mainstreamPrompt ? 8 : 3)
       : 0;
     const releaseYear = typeof track.release_year === 'number' && Number.isFinite(track.release_year)
       ? Math.floor(track.release_year)
       : null;
     const yearBoost = releaseYear !== null && releaseYear >= 1955 && releaseYear <= 1999 ? 1 : 0;
-    const mainstreamPenalty = mainstreamPrompt && preferredArtists.size > 0 && !preferredArtists.has(normalize(track.artist))
+    const mainstreamPenalty = mainstreamPrompt && preferredArtistKeys.length > 0 && !matchesPreferredArtist
       ? 2
       : 0;
     const finalScore = preferredArtistBoost + yearBoost - variantPenalty - commercialPenalty - mainstreamPenalty;
@@ -3145,14 +3167,14 @@ function applyStudioArtistDiversity(tracks: Track[]): Track[] {
   const chosenKeys = new Set<string>();
   const artistCounts = new Map<string, number>();
 
-  const getTrackKey = (track: Track): string => `${normalize(track.artist)}::${normalize(track.song)}`;
+  const getTrackKey = (track: Track): string => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
 
   const addWithArtistCap = (artistCap: number): void => {
     for (const track of tracks) {
       if (chosen.length >= desiredCount) break;
       const trackKey = getTrackKey(track);
       if (!trackKey || chosenKeys.has(trackKey)) continue;
-      const artistKey = normalize(track.artist);
+      const artistKey = normalizeArtistIdentity(track.artist);
       if (!artistKey) continue;
       const artistCount = artistCounts.get(artistKey) || 0;
       if (artistCount >= artistCap) continue;

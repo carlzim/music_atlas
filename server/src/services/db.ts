@@ -3421,10 +3421,13 @@ export function hasRecordingStudioEvidence(
       ? 'INNER JOIN playlists p ON p.id = rse.source_playlist_id'
       : '';
     const trustedWhereClause = trustedOnly
-      ? 'AND p.prompt LIKE ?'
+      ? 'AND (p.prompt LIKE ? OR p.prompt LIKE ?)'
       : '';
     const params: Array<string> = [canonicalKey, normalizedStudio];
-    if (trustedOnly) params.push('[system] studio evidence backfill from discogs ::%');
+    if (trustedOnly) {
+      params.push('[system] studio evidence backfill from discogs ::%');
+      params.push('[system] studio evidence backfill from musicbrainz ::%');
+    }
 
     const row = db.prepare(`
       SELECT 1 AS matched
@@ -3457,10 +3460,13 @@ export function getTracksByRecordingStudioEvidence(
       ? 'INNER JOIN playlists p ON p.id = rse.source_playlist_id'
       : '';
     const trustedWhereClause = trustedOnly
-      ? 'AND p.prompt LIKE ?'
+      ? 'AND (p.prompt LIKE ? OR p.prompt LIKE ?)'
       : '';
     const params: Array<string | number> = [normalizedStudio];
-    if (trustedOnly) params.push('[system] studio evidence backfill from discogs ::%');
+    if (trustedOnly) {
+      params.push('[system] studio evidence backfill from discogs ::%');
+      params.push('[system] studio evidence backfill from musicbrainz ::%');
+    }
     params.push(safeLimit);
 
     const rows = db.prepare(`

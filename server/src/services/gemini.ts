@@ -1705,15 +1705,22 @@ async function rankStudioTracksByRecognition(
 ): Promise<Track[]> {
   if (tracks.length <= 1) return tracks;
 
+  const mainstreamPrompt = /\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/i.test(_prompt);
+
   const scored = tracks.map((track, index) => {
     const variantPenalty = getStudioTrackVariantPenalty(track.song);
     const commercialPenalty = getStudioTrackCommercialPenalty(track.artist, track.song);
-    const preferredArtistBoost = preferredArtists.has(normalize(track.artist)) ? 3 : 0;
+    const preferredArtistBoost = preferredArtists.has(normalize(track.artist))
+      ? (mainstreamPrompt ? 8 : 3)
+      : 0;
     const releaseYear = typeof track.release_year === 'number' && Number.isFinite(track.release_year)
       ? Math.floor(track.release_year)
       : null;
     const yearBoost = releaseYear !== null && releaseYear >= 1955 && releaseYear <= 1999 ? 1 : 0;
-    const finalScore = preferredArtistBoost + yearBoost - variantPenalty - commercialPenalty;
+    const mainstreamPenalty = mainstreamPrompt && preferredArtists.size > 0 && !preferredArtists.has(normalize(track.artist))
+      ? 2
+      : 0;
+    const finalScore = preferredArtistBoost + yearBoost - variantPenalty - commercialPenalty - mainstreamPenalty;
     return { track, index, finalScore };
   });
 

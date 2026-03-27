@@ -410,23 +410,83 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     }
 
     if (discogsLabelId && Number.isFinite(discogsLabelId) && discogsLabelId > 0) {
-      let discogsTracks = await fetchDiscogsStudioTracksByLabel(discogsLabelId, studioName, Math.max(limit, 120), activeStartYear, activeEndYear);
-      if (effectiveArtistHints.length > 0) {
-        const fallbackLimit = Math.max(50, Math.min(limit, 120));
-        const fallbackTracks = await fetchDiscogsStudioTracksByArtistHints(studioName, effectiveArtistHints, fallbackLimit, activeStartYear, activeEndYear);
+      const desiredDiscogsSeed = Math.max(limit, 120);
+      const mainstreamHintLimit = mainstreamPrompt ? 3 : effectiveArtistHints.length;
+      const prioritizedHints = effectiveArtistHints.slice(0, mainstreamHintLimit);
+
+      let discogsTracks: Array<{
+        artist: string;
+        title: string;
+        studioName: string;
+        releaseId: number;
+        releaseTitle: string;
+        sourceRef: string;
+      }> = [];
+
+      if (mainstreamPrompt && prioritizedHints.length > 0) {
+        discogsTracks = await fetchDiscogsStudioTracksByArtistCatalog(
+          studioName,
+          prioritizedHints,
+          Math.max(20, Math.min(desiredDiscogsSeed, 45)),
+          activeStartYear,
+          activeEndYear
+        );
+      }
+
+      const mainstreamQuickMode = mainstreamPrompt && studioTracks.length >= 80;
+
+      const needLabelFetch =
+        !mainstreamQuickMode
+        && (
+        !mainstreamPrompt
+        || discogsTracks.length < Math.min(35, limit)
+        || countUniqueArtists(discogsTracks) < minimumBreadthTarget
+        );
+
+      if (needLabelFetch) {
+        const labelTracks = await fetchDiscogsStudioTracksByLabel(
+          discogsLabelId,
+          studioName,
+          desiredDiscogsSeed,
+          activeStartYear,
+          activeEndYear
+        );
         const dedupeKeys = new Set<string>();
         const merged: typeof discogsTracks = [];
-        for (const row of [...fallbackTracks, ...discogsTracks]) {
+        for (const row of [...discogsTracks, ...labelTracks]) {
           const key = `${row.artist.toLowerCase()}::${row.title.toLowerCase()}::${row.releaseId}`;
           if (dedupeKeys.has(key)) continue;
           dedupeKeys.add(key);
           merged.push(row);
-          if (merged.length >= Math.max(limit, 120)) break;
+          if (merged.length >= desiredDiscogsSeed) break;
         }
         discogsTracks = merged;
       }
-      if ((discogsTracks.length < Math.min(30, limit) || countUniqueArtists(discogsTracks) < minimumBreadthTarget) && effectiveArtistHints.length > 0) {
-        const catalogTracks = await fetchDiscogsStudioTracksByArtistCatalog(studioName, effectiveArtistHints, Math.max(50, Math.min(limit, 120)), activeStartYear, activeEndYear);
+
+      if (prioritizedHints.length > 0) {
+        const hintTracks = await fetchDiscogsStudioTracksByArtistHints(
+          studioName,
+          prioritizedHints,
+          mainstreamQuickMode
+            ? Math.max(15, Math.min(limit, 30))
+            : Math.max(35, Math.min(limit, 80)),
+          activeStartYear,
+          activeEndYear
+        );
+        const dedupeKeys = new Set<string>();
+        const merged: typeof discogsTracks = [];
+        for (const row of [...hintTracks, ...discogsTracks]) {
+          const key = `${row.artist.toLowerCase()}::${row.title.toLowerCase()}::${row.releaseId}`;
+          if (dedupeKeys.has(key)) continue;
+          dedupeKeys.add(key);
+          merged.push(row);
+          if (merged.length >= desiredDiscogsSeed) break;
+        }
+        discogsTracks = merged;
+      }
+
+      if (!mainstreamQuickMode && (discogsTracks.length < Math.min(30, limit) || countUniqueArtists(discogsTracks) < minimumBreadthTarget) && prioritizedHints.length > 0) {
+        const catalogTracks = await fetchDiscogsStudioTracksByArtistCatalog(studioName, prioritizedHints, Math.max(40, Math.min(limit, 90)), activeStartYear, activeEndYear);
         const dedupeKeys = new Set<string>();
         const merged: typeof discogsTracks = [];
         for (const row of [...catalogTracks, ...discogsTracks]) {
@@ -434,7 +494,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
           if (dedupeKeys.has(key)) continue;
           dedupeKeys.add(key);
           merged.push(row);
-          if (merged.length >= Math.max(limit, 120)) break;
+          if (merged.length >= desiredDiscogsSeed) break;
         }
         discogsTracks = merged;
       }

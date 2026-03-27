@@ -584,7 +584,7 @@ function extractPlaceEntityFromPrompt(prompt: string): string | null {
       .trim();
     if (!withoutTemporalSuffix) return '';
 
-    const studioWithLocation = withoutTemporalSuffix.match(/^(.+?\b(?:studio|studios|studion|studior|studiorna)\b)\s+(?:in|i)\s+(.+)$/i);
+    const studioWithLocation = withoutTemporalSuffix.match(/^(.+?(?:\b(?:studio|studios|studion|studior|studiorna)\b|[a-z0-9-]*studion))\s+(?:in|i)\s+(.+)$/i);
     if (studioWithLocation) {
       const studioPart = (studioWithLocation[1] || '').trim();
       const locationPart = (studioWithLocation[2] || '').trim();

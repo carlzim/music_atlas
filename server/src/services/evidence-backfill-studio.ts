@@ -98,11 +98,30 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   }
 
   if (!discogsLabelId || !Number.isFinite(discogsLabelId) || discogsLabelId <= 0) {
-    try {
-      discogsLabelId = await searchDiscogsStudioLabelId(studioName) || undefined;
-      if (discogsLabelId) discogsLabelSource = 'search';
-    } catch {
-      discogsLabelId = undefined;
+    const searchCandidates = Array.from(
+      new Set(
+        [
+          studioName,
+          ...(resolved?.acceptedStudioNames || []),
+          studioName.replace(/,\s*stockholm$/i, ''),
+          studioName.replace(/,\s*london$/i, ''),
+          studioName.replace(/,\s*los angeles$/i, ''),
+        ]
+          .map((value) => canonicalizeDisplayName(value || ''))
+          .filter((value) => value.length > 0)
+      )
+    );
+
+    for (const searchCandidate of searchCandidates) {
+      try {
+        discogsLabelId = await searchDiscogsStudioLabelId(searchCandidate) || undefined;
+      } catch {
+        discogsLabelId = undefined;
+      }
+      if (discogsLabelId && Number.isFinite(discogsLabelId) && discogsLabelId > 0) {
+        discogsLabelSource = 'search';
+        break;
+      }
     }
   }
 

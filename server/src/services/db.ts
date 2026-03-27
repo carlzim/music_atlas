@@ -2632,9 +2632,8 @@ export function getArtistAtlas(artist: string): {
   const relatedArtists = Array.from(relatedArtistCounts.values())
     .filter(
       (item) => item.sharedMembershipEvidence >= 1
-        || item.edgeEvidence >= 2
-        || item.sharedCreditEvidence >= 1
-        || item.sharedStudioEvidence >= 2
+        || item.sharedCreditEvidence >= 2
+        || item.sharedStudioEvidence >= 3
     )
     .sort((a, b) => {
       const aShared = a.sharedCreditEvidence + a.sharedStudioEvidence;

@@ -213,9 +213,9 @@ const STUDIO_AUTO_BACKFILL_COOLDOWN_MS = Math.max(
 );
 const STUDIO_AUTO_BACKFILL_TIMEOUT_MS = Math.max(
   1000,
-  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '12000'))
-    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '12000')
-    : 12000
+  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '30000'))
+    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '30000')
+    : 30000
 );
 const lastAutoBackfillByCredit = new Map<string, number>();
 const lastAutoBackfillByStudio = new Map<string, number>();
@@ -1664,6 +1664,48 @@ async function applyRequestedDecadeFilter(prompt: string, tracks: Track[]): Prom
     const decade = getTrackDecade(track);
     return decade !== null && allowed.has(decade);
   });
+}
+
+function getStudioTrackVariantPenalty(songTitle: string): number {
+  const lower = songTitle.toLowerCase();
+  let penalty = 0;
+  if (/\b(remix|mix|dub|edit|version|instrumental|karaoke|rework|radio edit|extended)\b/.test(lower)) penalty += 10;
+  if (/\b(live|demo|outtake|rehearsal)\b/.test(lower)) penalty += 8;
+  return penalty;
+}
+
+async function rankStudioTracksByRecognition(prompt: string, tracks: Track[]): Promise<Track[]> {
+  if (tracks.length <= 1) return tracks;
+
+  const scored = await Promise.all(
+    tracks.map(async (track, index) => {
+      let recognitionScore = 0;
+      try {
+        const info = await searchTrackWithDiagnostics(track.artist, track.song, prompt);
+        if (!track.spotify_url && info.spotify_url) track.spotify_url = info.spotify_url;
+        if (!track.album_image_url && info.album_image_url) track.album_image_url = info.album_image_url;
+        if (typeof track.release_year !== 'number' && typeof info.release_year === 'number') {
+          track.release_year = info.release_year;
+        }
+        recognitionScore = typeof info.score === 'number' && Number.isFinite(info.score)
+          ? info.score
+          : 0;
+      } catch {
+        recognitionScore = 0;
+      }
+
+      const variantPenalty = getStudioTrackVariantPenalty(track.song);
+      const finalScore = recognitionScore - variantPenalty;
+      return { track, index, finalScore };
+    })
+  );
+
+  scored.sort((a, b) => {
+    if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
+    return a.index - b.index;
+  });
+
+  return scored.map((row) => row.track);
 }
 
 function dedupeStudiosByCanonical(studios: string[]): string[] {
@@ -3982,6 +4024,13 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       if (studioBackfillEnabled) {
         const evidenceBeforeStudioBackfill = getCombinedStudioEvidenceCount(constraint);
         const forceStudioBackfillAttempt = evidenceBeforeStudioBackfill === 0;
+        const studioArtistHints = Array.from(
+          new Set(
+            candidateTracks
+              .map((track) => canonicalizeDisplayName(track.artist || ''))
+              .filter((artist) => artist.length > 0)
+          )
+        ).slice(0, 12);
         const studioBackfillWindow = shouldAttemptStudioAutoBackfill(
           studioName,
           constraint.studioIdentityKey,
@@ -4005,6 +4054,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
               () => backfillStudioFromDiscogs({
                 studioName,
                 prompt: translatedPrompt,
+                artistHints: studioArtistHints,
                 limit: 80,
               }),
               STUDIO_AUTO_BACKFILL_TIMEOUT_MS,
@@ -4398,6 +4448,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   const studioVerifiedBeforeDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
   if (constraint?.kind === 'studio') {
     playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
+    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks);
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
 

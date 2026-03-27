@@ -4,13 +4,14 @@ import {
   getPlaylistByPrompt,
   savePlaylist,
 } from './db.js';
-import { fetchDiscogsStudioTracksByLabel, isDiscogsConfigured, searchDiscogsStudioLabelId } from './discogs.js';
+import { fetchDiscogsStudioTracksByArtistHints, fetchDiscogsStudioTracksByLabel, isDiscogsConfigured, searchDiscogsStudioLabelId } from './discogs.js';
 import { buildStudioCanonicalKey, canonicalizeDisplayName } from './normalize.js';
 import { resolveStudioIdentity, resolveStudioIdentityFromPrompt } from './studio-identity.js';
 
 export interface StudioEvidenceBackfillParams {
   studioName: string;
   prompt?: string;
+  artistHints?: string[];
   limit?: number;
 }
 
@@ -142,7 +143,24 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   }
 
   const sourcePlaylistId = ensureSourcePlaylistId(studioName);
-  const discogsTracks = await fetchDiscogsStudioTracksByLabel(discogsLabelId, studioName, limit);
+  let discogsTracks = await fetchDiscogsStudioTracksByLabel(discogsLabelId, studioName, limit);
+  const artistHints = Array.isArray(params.artistHints)
+    ? Array.from(new Set(params.artistHints.map((value) => canonicalizeDisplayName(value || '')).filter((value) => value.length > 0))).slice(0, 12)
+    : [];
+  if (artistHints.length > 0) {
+    const fallbackLimit = Math.max(30, Math.min(limit, 100));
+    const fallbackTracks = await fetchDiscogsStudioTracksByArtistHints(studioName, artistHints, fallbackLimit);
+    const dedupeKeys = new Set<string>();
+    const merged: typeof discogsTracks = [];
+    for (const row of [...fallbackTracks, ...discogsTracks]) {
+      const key = `${row.artist.toLowerCase()}::${row.title.toLowerCase()}::${row.releaseId}`;
+      if (dedupeKeys.has(key)) continue;
+      dedupeKeys.add(key);
+      merged.push(row);
+      if (merged.length >= limit) break;
+    }
+    discogsTracks = merged;
+  }
   if (discogsTracks.length === 0) {
     return {
       attempted: true,
@@ -182,8 +200,14 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     INSERT INTO recording_studio_evidence (recording_id, studio_name, studio_name_canonical, source_playlist_id)
     VALUES (?, ?, ?, ?)
   `);
+  const deletePriorStudioEvidenceForSource = db.prepare(`
+    DELETE FROM recording_studio_evidence
+    WHERE source_playlist_id = ?
+      AND COALESCE(studio_name_canonical, lower(trim(studio_name))) = ?
+  `);
 
   const studioCanonical = buildStudioCanonicalKey(studioName);
+  deletePriorStudioEvidenceForSource.run(sourcePlaylistId, studioCanonical);
   let insertedRecordings = 0;
   let insertedEvidence = 0;
   let skippedExistingEvidence = 0;

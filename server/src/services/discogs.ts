@@ -321,6 +321,10 @@ export interface DiscogsStudioTrack {
   sourceRef: string;
 }
 
+interface RankedDiscogsStudioTrack extends DiscogsStudioTrack {
+  _rank: number;
+}
+
 function studioNameLikelyMatches(candidate: string, target: string): boolean {
   const a = buildStudioCanonicalKey(candidate);
   const b = buildStudioCanonicalKey(target);
@@ -330,8 +334,8 @@ function studioNameLikelyMatches(candidate: string, target: string): boolean {
 }
 
 function getDiscogsStudioMaxReleaseFetches(): number {
-  const parsed = Number(process.env.DISCOGS_STUDIO_MAX_RELEASE_FETCHES || 12);
-  if (!Number.isFinite(parsed) || parsed < 8) return 12;
+  const parsed = Number(process.env.DISCOGS_STUDIO_MAX_RELEASE_FETCHES || 20);
+  if (!Number.isFinite(parsed) || parsed < 8) return 20;
   return Math.max(8, Math.min(80, Math.floor(parsed)));
 }
 
@@ -393,6 +397,97 @@ function getDiscogsCanonicalTrackTitleKey(title: string): string {
     .trim();
 }
 
+function buildDiscogsStudioTracksFromRelease(
+  releaseId: number,
+  releaseRaw: {
+    title?: unknown;
+    artists?: unknown[];
+    companies?: unknown[];
+    notes?: unknown;
+    tracklist?: unknown[];
+  },
+  targetStudio: string,
+  sourceRefPrefix: string,
+  releaseScore: number,
+  dedupe: Set<string>
+): RankedDiscogsStudioTrack[] {
+  if (!hasRecordedStudioEvidenceInRelease(releaseRaw, targetStudio)) return [];
+
+  const releaseTitle = typeof releaseRaw.title === 'string' ? releaseRaw.title.trim() : '';
+  const releaseArtists = extractReleaseArtists(releaseRaw.artists);
+  const tracks: RankedDiscogsStudioTrack[] = [];
+  const tracklist = Array.isArray(releaseRaw.tracklist) ? releaseRaw.tracklist : [];
+
+  for (const track of tracklist) {
+    if (!track || typeof track !== 'object') continue;
+    const row = track as { title?: unknown; artists?: unknown[]; type_?: unknown; type?: unknown };
+    const title = typeof row.title === 'string' ? row.title.trim() : '';
+    if (!title) continue;
+
+    const typeValue = typeof row.type_ === 'string'
+      ? row.type_.trim().toLowerCase()
+      : typeof row.type === 'string'
+        ? row.type.trim().toLowerCase()
+        : '';
+    if (typeValue && typeValue !== 'track' && typeValue !== 'index') continue;
+
+    const trackArtists = extractReleaseArtists(row.artists);
+    const artist = (trackArtists[0] || releaseArtists[0] || '').trim();
+    if (!artist) continue;
+
+    const canonicalTitle = getDiscogsCanonicalTrackTitleKey(title) || title.toLowerCase();
+    const key = `${artist.toLowerCase()}::${canonicalTitle}::${targetStudio.toLowerCase()}`;
+    if (dedupe.has(key)) continue;
+    dedupe.add(key);
+
+    const titleQualityScore = getDiscogsStudioTrackTitleQualityScore(title);
+    tracks.push({
+      artist,
+      title,
+      studioName: targetStudio,
+      releaseId,
+      releaseTitle,
+      sourceRef: `${sourceRefPrefix}${releaseId}`,
+      _rank: (releaseScore * 10) + titleQualityScore,
+    });
+  }
+
+  return tracks;
+}
+
+function hasRecordedStudioEvidenceInRelease(releaseRaw: {
+  companies?: unknown[];
+  notes?: unknown;
+}, targetStudio: string): boolean {
+  const companyRecordedAtNames = Array.isArray(releaseRaw.companies)
+    ? releaseRaw.companies
+        .map((item) => {
+          if (!item || typeof item !== 'object') return { name: '', role: '' };
+          const value = item as { name?: unknown; entity_type_name?: unknown };
+          const name = typeof value.name === 'string' ? value.name.trim() : '';
+          const role = typeof value.entity_type_name === 'string' ? value.entity_type_name.trim().toLowerCase() : '';
+          return { name, role };
+        })
+        .filter((row) => row.name.length > 0 && /(recorded|tracked|cut)/.test(row.role))
+        .map((row) => row.name)
+    : [];
+
+  if (companyRecordedAtNames.some((name) => studioNameLikelyMatches(name, targetStudio))) {
+    return true;
+  }
+
+  const notes = typeof releaseRaw.notes === 'string' ? releaseRaw.notes : '';
+  const normalizedNotes = notes.toLowerCase();
+  if (!normalizedNotes) return false;
+  const targetStudioCanonical = buildStudioCanonicalKey(targetStudio);
+  const notesStudioCanonical = buildStudioCanonicalKey(notes);
+  if (!targetStudioCanonical || !notesStudioCanonical) return false;
+
+  const hasRecordedCue = /(recorded|tracked|cut)\s+at/.test(normalizedNotes);
+  if (!hasRecordedCue) return false;
+  return notesStudioCanonical.includes(targetStudioCanonical);
+}
+
 export async function fetchDiscogsStudioTracksByLabel(
   labelId: number,
   targetStudioName: string,
@@ -434,7 +529,7 @@ export async function fetchDiscogsStudioTracksByLabel(
     .slice(0, maxReleaseFetches)
     .map(([id]) => id);
 
-  const output: Array<DiscogsStudioTrack & { _rank: number }> = [];
+  const output: RankedDiscogsStudioTrack[] = [];
   const dedupe = new Set<string>();
 
   for (const releaseId of releaseIds) {
@@ -444,69 +539,93 @@ export async function fetchDiscogsStudioTracksByLabel(
     const releaseRaw = await rateLimitedDiscogsFetch(releaseUrl) as {
       title?: unknown;
       artists?: unknown[];
-      labels?: unknown[];
       companies?: unknown[];
+      notes?: unknown;
+      tracklist?: unknown[];
+    };
+    const releaseCommunityScore = releaseCandidates.get(releaseId) || 0;
+    const releaseTracks = buildDiscogsStudioTracksFromRelease(
+      releaseId,
+      releaseRaw,
+      targetStudio,
+      `discogs:label:${safeLabelId}:release:`,
+      releaseCommunityScore,
+      dedupe
+    );
+    output.push(...releaseTracks);
+  }
+
+  return output
+    .sort((a, b) => b._rank - a._rank)
+    .slice(0, safeLimit)
+    .map(({ _rank, ...row }) => row);
+}
+
+export async function fetchDiscogsStudioTracksByArtistHints(
+  targetStudioName: string,
+  artistHints: string[],
+  limit = 120
+): Promise<DiscogsStudioTrack[]> {
+  const targetStudio = targetStudioName.trim();
+  if (!targetStudio || !Array.isArray(artistHints) || artistHints.length === 0) return [];
+
+  const safeLimit = Math.max(1, Math.min(400, Math.floor(limit)));
+  const releaseCandidates = new Map<number, number>();
+  const hints = Array.from(new Set(artistHints.map((value) => value.trim()).filter(Boolean))).slice(0, 10);
+
+  for (const artistHint of hints) {
+    const query = `${artistHint} ${targetStudio}`.trim();
+    const url = `${DISCOGS_BASE_URL}/database/search?type=release&q=${encodeURIComponent(query)}&per_page=12`;
+    const raw = await rateLimitedDiscogsFetch(url) as { results?: unknown[] };
+    const results = Array.isArray(raw.results) ? raw.results : [];
+
+    for (const item of results) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as { id?: unknown; type?: unknown; title?: unknown };
+      const type = typeof row.type === 'string' ? row.type.trim().toLowerCase() : '';
+      if (type && type !== 'release') continue;
+
+      const id = typeof row.id === 'number' ? row.id : Number(row.id || 0);
+      if (!Number.isFinite(id) || id <= 0) continue;
+
+      const baseScore = getDiscogsReleaseCommunityScore(item);
+      const title = typeof row.title === 'string' ? row.title.toLowerCase() : '';
+      const artistBoost = title.includes(artistHint.toLowerCase()) ? 30 : 0;
+      const score = baseScore + artistBoost;
+      const existingScore = releaseCandidates.get(id) || 0;
+      if (score > existingScore) releaseCandidates.set(id, score);
+      if (releaseCandidates.size >= safeLimit * 3) break;
+    }
+  }
+
+  const releaseIds = Array.from(releaseCandidates.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, Math.min(getDiscogsStudioMaxReleaseFetches(), safeLimit))
+    .map(([id]) => id);
+
+  const output: RankedDiscogsStudioTrack[] = [];
+  const dedupe = new Set<string>();
+  for (const releaseId of releaseIds) {
+    const releaseUrl = `${DISCOGS_BASE_URL}/releases/${releaseId}`;
+    const releaseRaw = await rateLimitedDiscogsFetch(releaseUrl) as {
+      title?: unknown;
+      artists?: unknown[];
+      companies?: unknown[];
+      notes?: unknown;
       tracklist?: unknown[];
     };
 
-    const releaseTitle = typeof releaseRaw.title === 'string' ? releaseRaw.title.trim() : '';
-    const releaseArtists = extractReleaseArtists(releaseRaw.artists);
-
-    const companyRecordedAtNames = Array.isArray(releaseRaw.companies)
-      ? releaseRaw.companies
-          .map((item) => {
-            if (!item || typeof item !== 'object') return { name: '', role: '' };
-            const value = item as { name?: unknown; entity_type_name?: unknown };
-            const name = typeof value.name === 'string' ? value.name.trim() : '';
-            const role = typeof value.entity_type_name === 'string' ? value.entity_type_name.trim().toLowerCase() : '';
-            return { name, role };
-          })
-          .filter((row) => row.name.length > 0 && row.role.includes('recorded'))
-          .map((row) => row.name)
-      : [];
-
-    const recordedAtHints = Array.from(new Set(companyRecordedAtNames));
-    if (recordedAtHints.length > 0) {
-      const hasRecordedAtStudioMatch = recordedAtHints.some((name) => studioNameLikelyMatches(name, targetStudio));
-      if (!hasRecordedAtStudioMatch) continue;
-    }
-
-    const tracklist = Array.isArray(releaseRaw.tracklist) ? releaseRaw.tracklist : [];
-    for (const track of tracklist) {
-      if (output.length >= safeLimit) break;
-      if (!track || typeof track !== 'object') continue;
-      const row = track as { title?: unknown; artists?: unknown[]; type_?: unknown; type?: unknown };
-      const title = typeof row.title === 'string' ? row.title.trim() : '';
-      if (!title) continue;
-
-      const typeValue = typeof row.type_ === 'string'
-        ? row.type_.trim().toLowerCase()
-        : typeof row.type === 'string'
-          ? row.type.trim().toLowerCase()
-          : '';
-      if (typeValue && typeValue !== 'track' && typeValue !== 'index') continue;
-
-      const trackArtists = extractReleaseArtists(row.artists);
-      const artist = (trackArtists[0] || releaseArtists[0] || '').trim();
-      if (!artist) continue;
-
-      const canonicalTitle = getDiscogsCanonicalTrackTitleKey(title) || title.toLowerCase();
-      const key = `${artist.toLowerCase()}::${canonicalTitle}::${safeLabelId}`;
-      if (dedupe.has(key)) continue;
-      dedupe.add(key);
-
-      const releaseCommunityScore = releaseCandidates.get(releaseId) || 0;
-      const titleQualityScore = getDiscogsStudioTrackTitleQualityScore(title);
-      output.push({
-        artist,
-        title,
-        studioName: targetStudio,
-        releaseId,
-        releaseTitle,
-        sourceRef: `discogs:label:${safeLabelId}:release:${releaseId}`,
-        _rank: (releaseCommunityScore * 10) + titleQualityScore,
-      });
-    }
+    const releaseScore = releaseCandidates.get(releaseId) || 0;
+    const releaseTracks = buildDiscogsStudioTracksFromRelease(
+      releaseId,
+      releaseRaw,
+      targetStudio,
+      'discogs:search:release:',
+      releaseScore,
+      dedupe
+    );
+    output.push(...releaseTracks);
+    if (output.length >= safeLimit * 2) break;
   }
 
   return output

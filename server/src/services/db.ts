@@ -3507,13 +3507,14 @@ export function getTracksByRecordingStudioEvidence(
     params.push(safeLimit);
 
     const rows = db.prepare(`
-      SELECT DISTINCT r.artist AS artist, r.title AS title
+      SELECT r.artist AS artist, r.title AS title, COUNT(*) AS evidence_count, MAX(rse.created_at) AS last_seen
       FROM recording_studio_evidence rse
       INNER JOIN recordings r ON r.id = rse.recording_id
       ${trustedJoinClause}
       WHERE COALESCE(rse.studio_name_canonical, lower(trim(rse.studio_name))) = ?
       ${trustedWhereClause}
-      ORDER BY r.created_at DESC
+      GROUP BY r.id, r.artist, r.title
+      ORDER BY evidence_count DESC, last_seen DESC
       LIMIT ?
     `).all(...params) as Array<{ artist?: string; title?: string }>;
 

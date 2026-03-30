@@ -132,7 +132,7 @@ function isLikelyClassicalOrScoreRecording(artist: string, title: string): boole
   const titleLower = title.toLowerCase();
 
   if (/\b(orchestra|symphony|philharmonic|choir|ensemble|quartet|quintet|conductor|maestro)\b/.test(artistLower)) return true;
-  if (/\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+|recitativo|aria|overture|requiem|nocturne|etude|waltz|prelude|fugue|scherzo)\b/.test(titleLower)) return true;
+  if (/\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+|recitativo|aria|overture|requiem|nocturne|etude|waltz|prelude|prélude|fugue|scherzo|mazurka|bourree|sarabande|gigue|largo|adagio|allegro|andante)\b/.test(titleLower)) return true;
   if (/\b(op\.?\s*\d+|no\.?\s*\d+|d\.?\s*\d+|k\.?\s*\d+|kv\.?\s*\d+|bwv\s*\d+)\b/.test(titleLower)) return true;
   if (/\b(der|die|das)\s+[a-zäöüß]+\b/.test(titleLower) && /\bd\.?\s*\d+\b/.test(titleLower)) return true;
   if (/\b(original motion picture soundtrack|motion picture|film score|soundtrack)\b/.test(titleLower)) return true;
@@ -175,7 +175,8 @@ function getStudioSeedQualityScore(
   if (artistMatchesPreferred(artist, preferredArtistKeys)) score += 2;
   if (track.source === 'discogs') score += mainstreamPrompt ? 5 : 2;
   if (track.source === 'musicbrainz' && typeof track.mbArtistFrequency === 'number' && Number.isFinite(track.mbArtistFrequency)) {
-    score += Math.min(10, Math.log2(Math.max(1, track.mbArtistFrequency) + 1) * 2.5);
+    score += Math.min(28, Math.sqrt(Math.max(1, track.mbArtistFrequency)) * 2.2);
+    if (track.mbArtistFrequency <= 2) score -= 6;
   }
   if (isLikelySongRecording(artist, title)) score += 3;
   if (wantsClassicalMusic && isLikelyClassicalOrScoreRecording(artist, title)) score += 18;
@@ -184,6 +185,8 @@ function getStudioSeedQualityScore(
 
   const artistCommaCount = (artist.match(/,/g) || []).length;
   if (artistCommaCount >= 2) score -= 8;
+  if (/\(\d+\)/.test(artist)) score -= 6;
+  if (/\bfeat\.?\b/i.test(artist)) score -= 4;
   if (title.includes(':') && !wantsClassicalMusic) score -= 6;
   if (artist.length >= 60) score -= 4;
   if (title.length >= 70) score -= 4;
@@ -257,6 +260,33 @@ function diversifyStudioSeedTracks<T extends { artist: string; title: string }>(
   return selected;
 }
 
+function limitStudioSeedTracksByArtist<T extends { artist: string; title: string }>(
+  tracks: T[],
+  desired: number,
+  perArtistCap = 4
+): T[] {
+  if (tracks.length <= 1 || desired <= 0) return tracks.slice(0, Math.max(0, desired));
+  const target = Math.min(desired, tracks.length);
+  const selected: T[] = [];
+  const selectedKeys = new Set<string>();
+  const artistCounts = new Map<string, number>();
+
+  for (const track of tracks) {
+    if (selected.length >= target) break;
+    const key = normalizeTrackKey(track.artist, track.title);
+    if (!key || selectedKeys.has(key)) continue;
+    const artistKey = normalizeArtistKey(track.artist);
+    if (!artistKey) continue;
+    const count = artistCounts.get(artistKey) || 0;
+    if (count >= perArtistCap) continue;
+    selected.push(track);
+    selectedKeys.add(key);
+    artistCounts.set(artistKey, count + 1);
+  }
+
+  return selected;
+}
+
 function ensureSourcePlaylistId(studioName: string, source: 'discogs' | 'musicbrainz'): number {
   const sourcePrompt = `[system] studio evidence backfill from ${source} :: ${studioName}`;
   const existing = getPlaylistByPrompt(sourcePrompt) || getPlaylistByCacheKey(sourcePrompt);
@@ -271,6 +301,12 @@ function ensureSourcePlaylistId(studioName: string, source: 'discogs' | 'musicbr
   );
 
   return created.id;
+}
+
+function getExistingSourcePlaylistId(studioName: string, source: 'discogs' | 'musicbrainz'): number | undefined {
+  const sourcePrompt = `[system] studio evidence backfill from ${source} :: ${studioName}`;
+  const existing = getPlaylistByPrompt(sourcePrompt) || getPlaylistByCacheKey(sourcePrompt);
+  return existing?.id;
 }
 
 export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillParams): Promise<StudioEvidenceBackfillResult> {
@@ -413,6 +449,9 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
             if (typeof activeStartYear === 'number' && year < activeStartYear) continue;
             if (typeof activeEndYear === 'number' && year > activeEndYear) continue;
           }
+          if (mainstreamPrompt && !wantsClassicalMusic && typeof activeStartYear === 'number' && year === null) {
+            continue;
+          }
 
           const artistKey = normalizeArtistKey(artist);
           const artistFrequency = artistKey ? (mbArtistFrequency.get(artistKey) || 0) : 0;
@@ -439,7 +478,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
           uniqueMbSeed.push(row);
         }
 
-        studioTracks = diversifyStudioSeedTracks(uniqueMbSeed, Math.max(limit * 3, 120));
+        studioTracks = uniqueMbSeed;
       }
     } catch {
       // MusicBrainz studio backfill is best-effort.
@@ -447,9 +486,13 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   }
 
   const minimumBreadthTarget = Math.min(8, Math.max(4, Math.floor(limit / 3)));
+  const hasSufficientMusicBrainzCore = studioTracks.length >= 16 || countUniqueArtists(studioTracks) >= 8;
   const shouldUseDiscogsFallback =
-    studioTracks.length < Math.min(40, limit)
-    || countUniqueArtists(studioTracks) < minimumBreadthTarget;
+    (!hasSufficientMusicBrainzCore)
+    && (
+      studioTracks.length < Math.min(40, limit)
+      || countUniqueArtists(studioTracks) < minimumBreadthTarget
+    );
 
   if (discogsEnabled && shouldUseDiscogsFallback) {
     attemptedDiscogs = true;
@@ -590,7 +633,10 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
         });
 
       const mergedByKey = new Map<string, StudioSeedTrack>();
-      const sourcePriority = mainstreamPrompt ? [...discogsSeed, ...studioTracks] : [...studioTracks, ...discogsSeed];
+      const hasStrongMbBase = studioTracks.length >= 24 && countUniqueArtists(studioTracks) >= 10;
+      const trimmedDiscogsSeed = hasStrongMbBase ? discogsSeed.slice(0, 36) : discogsSeed;
+      const protectedMb = mainstreamPrompt ? studioTracks.slice(0, 24) : studioTracks.slice(0, 12);
+      const sourcePriority = [...protectedMb, ...trimmedDiscogsSeed, ...studioTracks.slice(protectedMb.length)];
       for (const row of sourcePriority) {
         const key = normalizeTrackKey(row.artist, row.title);
         if (!key || mergedByKey.has(key)) continue;
@@ -642,7 +688,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     studioTracks = merged;
   }
 
-  studioTracks = diversifyStudioSeedTracks(studioTracks, Math.max(limit, 120));
+  studioTracks = limitStudioSeedTracksByArtist(studioTracks, Math.max(limit * 3, 180), 4);
 
   if (studioTracks.length === 0) {
     const skippedReason = !attemptedMusicBrainz && !attemptedDiscogs
@@ -695,13 +741,27 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
       AND COALESCE(studio_name_canonical, lower(trim(studio_name))) = ?
   `);
 
-  const studioCanonical = buildStudioCanonicalKey(studioName);
+  const studioCanonicalKeys = Array.from(
+    new Set(
+      [studioName, ...acceptedStudioNames]
+        .map((value) => buildStudioCanonicalKey(value))
+        .filter((value) => value.length > 0)
+    )
+  );
+  const studioCanonical = studioCanonicalKeys[0] || buildStudioCanonicalKey(studioName);
   const sourcesUsed = new Set<'discogs' | 'musicbrainz'>(studioTracks.map((row) => row.source));
   const sourcePlaylistBySource = new Map<'discogs' | 'musicbrainz', number>();
-  for (const source of sourcesUsed) {
-    const sourcePlaylistId = ensureSourcePlaylistId(studioName, source);
-    sourcePlaylistBySource.set(source, sourcePlaylistId);
-    deletePriorStudioEvidenceForSource.run(sourcePlaylistId, studioCanonical);
+  for (const source of ['discogs', 'musicbrainz'] as const) {
+    const sourcePlaylistId = sourcesUsed.has(source)
+      ? ensureSourcePlaylistId(studioName, source)
+      : getExistingSourcePlaylistId(studioName, source);
+    if (typeof sourcePlaylistId !== 'number' || !Number.isFinite(sourcePlaylistId)) continue;
+    if (sourcesUsed.has(source)) {
+      sourcePlaylistBySource.set(source, sourcePlaylistId);
+    }
+    for (const canonicalKey of studioCanonicalKeys) {
+      deletePriorStudioEvidenceForSource.run(sourcePlaylistId, canonicalKey);
+    }
   }
 
   let insertedRecordings = 0;

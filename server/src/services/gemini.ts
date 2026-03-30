@@ -217,9 +217,9 @@ const STUDIO_AUTO_BACKFILL_COOLDOWN_MS = Math.max(
 );
 const STUDIO_AUTO_BACKFILL_TIMEOUT_MS = Math.max(
   1000,
-  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '60000'))
-    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '60000')
-    : 60000
+  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '180000'))
+    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '180000')
+    : 180000
 );
 const lastAutoBackfillByCredit = new Map<string, number>();
 const lastAutoBackfillByStudio = new Map<string, number>();
@@ -1454,7 +1454,7 @@ function isLikelyClassicalOrScoreTrack(artistName: string, songTitle: string): b
   if (!artist && !title) return false;
 
   if (/\b(orchestra|symphony|philharmonic|choir|ensemble|quartet|quintet|conductor|maestro)\b/.test(artist)) return true;
-  if (/\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+|recitativo|aria|overture|requiem|nocturne|etude|waltz|prelude|fugue|scherzo)\b/.test(title)) return true;
+  if (/\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+|recitativo|aria|overture|requiem|nocturne|etude|waltz|prelude|prélude|fugue|scherzo|mazurka|bourree|sarabande|gigue|largo|adagio|allegro|andante)\b/.test(title)) return true;
   if (/\b(op\.?\s*\d+|no\.?\s*\d+|d\.?\s*\d+|k\.?\s*\d+|kv\.?\s*\d+|bwv\s*\d+)\b/.test(title)) return true;
   if (/\b(der|die|das)\s+[a-zäöüß]+\b/.test(title) && /\bd\.?\s*\d+\b/.test(title)) return true;
   if (/\b(original motion picture soundtrack|motion picture|film score|soundtrack)\b/.test(title)) return true;
@@ -1719,6 +1719,8 @@ function getStudioTrackVariantPenalty(songTitle: string): number {
   let penalty = 0;
   if (/\b(remix|mix|dub|edit|version|instrumental|karaoke|rework|radio edit|extended)\b/.test(lower)) penalty += 10;
   if (/\b(live|demo|outtake|rehearsal)\b/.test(lower)) penalty += 8;
+  if (/\b(session|sessions|alternate take|mono mix|stereo mix|rough mix|working version)\b/.test(lower)) penalty += 7;
+  if (/\(\d{4}(?:[-/]\d{2}(?:[-/]\d{2})?)?\)/.test(songTitle)) penalty += 8;
   return penalty;
 }
 
@@ -1803,8 +1805,10 @@ async function rankStudioTracksByRecognition(
         lookupTimeoutMs
       );
       const recognition = typeof info?.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
+      const popularity = typeof info?.popularity === 'number' && Number.isFinite(info.popularity) ? info.popularity : 0;
       item.recognitionScore = recognition;
-      item.finalScore += Math.min(14, recognition / 9);
+      item.finalScore += Math.min(18, popularity / 5);
+      item.finalScore += Math.min(6, recognition / 8);
       if (info?.spotify_url && !item.track.spotify_url) item.track.spotify_url = info.spotify_url;
       if (info?.album_image_url && !item.track.album_image_url) item.track.album_image_url = info.album_image_url;
       if (typeof info?.matchedAlbumTitle === 'string' && info.matchedAlbumTitle.trim().length > 0 && !item.track.album_title) {
@@ -1822,6 +1826,69 @@ async function rankStudioTracksByRecognition(
   });
 
   return scored.map((row) => row.track);
+}
+
+async function applyStudioMainstreamRecognitionGate(prompt: string, tracks: Track[]): Promise<Track[]> {
+  if (tracks.length <= 1) return tracks;
+  if (promptWantsClassicalMusic(prompt)) return tracks;
+  if (!/\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/i.test(prompt)) {
+    return tracks;
+  }
+
+  const lookupCap = Math.min(24, tracks.length);
+  const lookupTimeoutMs = 1100;
+  const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
+    return await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), timeoutMs);
+      promise
+        .then((value) => {
+          clearTimeout(timer);
+          resolve(value);
+        })
+        .catch(() => {
+          clearTimeout(timer);
+          resolve(null);
+        });
+    });
+  };
+
+  const scored = await Promise.all(
+    tracks.slice(0, lookupCap).map(async (track, index) => {
+      const info = await withTimeout(searchTrackWithDiagnostics(track.artist, track.song, prompt), lookupTimeoutMs);
+      const recognition = typeof info?.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
+      const popularity = typeof info?.popularity === 'number' && Number.isFinite(info.popularity) ? info.popularity : 0;
+      if (info?.spotify_url && !track.spotify_url) track.spotify_url = info.spotify_url;
+      if (info?.album_image_url && !track.album_image_url) track.album_image_url = info.album_image_url;
+      if (typeof info?.matchedAlbumTitle === 'string' && info.matchedAlbumTitle.trim().length > 0 && !track.album_title) {
+        track.album_title = info.matchedAlbumTitle.trim();
+      }
+      if (typeof info?.release_year === 'number' && typeof track.release_year !== 'number') {
+        track.release_year = info.release_year;
+      }
+      return { track, index, recognition, popularity };
+    })
+  );
+
+  const strong = scored.filter((row) => row.popularity >= 60 || (row.popularity >= 48 && row.recognition >= 7));
+  const medium = scored.filter((row) => row.popularity >= 45 || (row.popularity >= 36 && row.recognition >= 7));
+  const prioritize = strong.length >= MIN_PLAYLIST_TRACKS
+    ? strong
+    : medium.length >= MIN_PLAYLIST_TRACKS
+      ? medium
+      : [];
+
+  if (prioritize.length === 0) return tracks;
+
+  prioritize.sort((a, b) => {
+    if (b.popularity !== a.popularity) return b.popularity - a.popularity;
+    if (b.recognition !== a.recognition) return b.recognition - a.recognition;
+    return a.index - b.index;
+  });
+
+  const prioritizedTracks = prioritize.map((row) => row.track);
+  const prioritizedKeys = new Set(prioritizedTracks.map((row) => `${normalizeArtistIdentity(row.artist)}::${normalize(row.song)}`));
+  const remainder = tracks.filter((track) => !prioritizedKeys.has(`${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
+  return [...prioritizedTracks, ...remainder];
 }
 
 function applyStudioIdentityYearBounds(constraint: PromptConstraint, tracks: Track[]): Track[] {
@@ -4779,8 +4846,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
     playlist.tracks = applyStudioClassicalPolicy(translatedPrompt, playlist.tracks);
     playlist.tracks = applyStudioCuratedTrackWhitelist(constraint, playlist.tracks);
-    playlist.tracks = applyStudioArtistDiversity(playlist.tracks);
     playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, preferredStudioArtists);
+    playlist.tracks = await applyStudioMainstreamRecognitionGate(translatedPrompt, playlist.tracks);
+    playlist.tracks = applyStudioArtistDiversity(playlist.tracks);
     playlist.tracks = enforceStudioClassicalRatio(translatedPrompt, playlist.tracks);
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;

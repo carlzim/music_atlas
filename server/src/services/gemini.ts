@@ -4817,13 +4817,14 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
   if (constraint?.kind === 'studio') {
     tags = canonicalizeGeneratedTags(['studio-evidence', 'recorded-at', 'studio']);
-    const studioNames = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
-      ? dedupeStudiosByCanonical(constraint.studioAcceptedNames)
-      : [constraint.value].filter(Boolean);
+    const canonicalStudioName = sanitizeStudioLabel(
+      constraint.value
+      || (Array.isArray(constraint.studioAcceptedNames) ? constraint.studioAcceptedNames[0] || '' : '')
+    );
     mergedLocations = {
       countries: [],
       cities: [],
-      studios: studioNames.slice(0, 3),
+      studios: canonicalStudioName ? [canonicalStudioName] : [],
       venues: [],
     };
   } else {

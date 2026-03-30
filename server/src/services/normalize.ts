@@ -38,6 +38,7 @@ export function buildStudioCanonicalKey(value: string): string {
   if (!canonical) return '';
 
   return canonical
+    .replace(/[.,;:()\[\]{}]/g, ' ')
     .replace(/\s+(?:in|during|from|at)\s+the\s+\d{2}(?:['’]s|s)\b.*$/g, '')
     .replace(/\s+(?:in|during|from|at)\s+\d{4}\b.*$/g, '')
     .replace(/\s+p[aå]\s+\d{2}-talet\b.*$/g, '')

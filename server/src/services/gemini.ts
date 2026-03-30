@@ -1746,8 +1746,8 @@ async function rankStudioTracksByRecognition(
 ): Promise<Track[]> {
   if (tracks.length <= 1) return tracks;
 
-  const mainstreamPrompt = /\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/i.test(_prompt);
   const wantsClassicalMusic = promptWantsClassicalMusic(_prompt);
+  const mainstreamPrompt = /\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/i.test(_prompt) && !wantsClassicalMusic;
   const preferredArtistKeys = Array.from(preferredArtists)
     .map((value) => normalizeArtistIdentity(value))
     .filter((value) => value.length > 0);
@@ -1757,7 +1757,7 @@ async function rankStudioTracksByRecognition(
     const commercialPenalty = getStudioTrackCommercialPenalty(track.artist, track.song);
     const matchesPreferredArtist = studioArtistMatchesPreferred(track.artist, preferredArtistKeys);
     const preferredArtistBoost = matchesPreferredArtist
-      ? (mainstreamPrompt ? 8 : 3)
+      ? (mainstreamPrompt ? 2 : 1)
       : 0;
     const releaseYear = typeof track.release_year === 'number' && Number.isFinite(track.release_year)
       ? Math.floor(track.release_year)
@@ -1772,7 +1772,7 @@ async function rankStudioTracksByRecognition(
   });
 
   if (mainstreamPrompt) {
-    const lookupCap = Math.min(6, scored.length);
+    const lookupCap = Math.min(20, scored.length);
     const lookupTimeoutMs = 1200;
 
     const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
@@ -1804,7 +1804,7 @@ async function rankStudioTracksByRecognition(
       );
       const recognition = typeof info?.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
       item.recognitionScore = recognition;
-      item.finalScore += Math.min(8, recognition / 20);
+      item.finalScore += Math.min(14, recognition / 9);
       if (info?.spotify_url && !item.track.spotify_url) item.track.spotify_url = info.spotify_url;
       if (info?.album_image_url && !item.track.album_image_url) item.track.album_image_url = info.album_image_url;
       if (typeof info?.matchedAlbumTitle === 'string' && info.matchedAlbumTitle.trim().length > 0 && !item.track.album_title) {
@@ -3350,6 +3350,23 @@ function applyStudioClassicalPolicy(prompt: string, tracks: Track[]): Track[] {
   return filtered.length > 0 ? filtered : tracks;
 }
 
+function enforceStudioClassicalRatio(prompt: string, tracks: Track[]): Track[] {
+  if (tracks.length <= 1) return tracks;
+  if (promptWantsClassicalMusic(prompt)) return tracks;
+
+  const maxClassicalShare = 0.05;
+  const maxClassicalCount = Math.floor(tracks.length * maxClassicalShare);
+  const classicalCount = tracks.reduce((count, track) => count + (isLikelyClassicalOrScoreTrack(track.artist, track.song) ? 1 : 0), 0);
+  if (classicalCount <= maxClassicalCount) return tracks;
+
+  const nonClassical = tracks.filter((track) => !isLikelyClassicalOrScoreTrack(track.artist, track.song));
+  const classical = tracks.filter((track) => isLikelyClassicalOrScoreTrack(track.artist, track.song));
+  const allowedClassical = classical.slice(0, Math.max(0, maxClassicalCount));
+  const merged = [...nonClassical, ...allowedClassical];
+  if (merged.length >= MIN_PLAYLIST_TRACKS) return merged;
+  return nonClassical.length >= MIN_PLAYLIST_TRACKS ? nonClassical : tracks;
+}
+
 function staggerArtistsForFlow(tracks: Track[]): Track[] {
   if (tracks.length < 3) return tracks;
 
@@ -4764,6 +4781,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     playlist.tracks = applyStudioCuratedTrackWhitelist(constraint, playlist.tracks);
     playlist.tracks = applyStudioArtistDiversity(playlist.tracks);
     playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, preferredStudioArtists);
+    playlist.tracks = enforceStudioClassicalRatio(translatedPrompt, playlist.tracks);
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
 

@@ -5,7 +5,7 @@ import {
   savePlaylist,
 } from './db.js';
 import { fetchDiscogsStudioTracksByArtistCatalog, fetchDiscogsStudioTracksByArtistHints, fetchDiscogsStudioTracksByLabel, isDiscogsConfigured, searchDiscogsStudioLabelId } from './discogs.js';
-import { fetchMusicBrainzStudioTracksByPlace, resolveMusicBrainzStudioPlace } from './musicbrainz.js';
+import { fetchMusicBrainzStudioTracksByPlace, resolveMusicBrainzStudioPlaces } from './musicbrainz.js';
 import { buildStudioCanonicalKey, canonicalizeDisplayName } from './normalize.js';
 import { resolveStudioIdentity, resolveStudioIdentityFromPrompt } from './studio-identity.js';
 
@@ -45,6 +45,7 @@ type StudioSeedTrack = {
   sourceRef: string;
   source: 'discogs' | 'musicbrainz';
   recordedYear?: number;
+  mbArtistFrequency?: number;
 };
 
 function normalizeRecordingToken(value: string): string {
@@ -144,44 +145,15 @@ function isLikelyClassicalOrScoreRecording(artist: string, title: string): boole
 function shouldKeepStudioTrackByClassicalPolicy(
   artist: string,
   title: string,
-  wantsClassicalMusic: boolean,
-  preferredArtistKeys: string[]
+  wantsClassicalMusic: boolean
 ): boolean {
   if (wantsClassicalMusic) return true;
   if (!isLikelyClassicalOrScoreRecording(artist, title)) return true;
-
-  // Conservative exception: only keep if it clearly maps to a preferred mainstream artist.
-  return artistMatchesPreferred(artist, preferredArtistKeys);
+  return false;
 }
 
 function countUniqueArtists(rows: Array<{ artist: string }>): number {
   return new Set(rows.map((row) => row.artist.trim().toLowerCase()).filter(Boolean)).size;
-}
-
-function countPreferredArtistMatches(
-  rows: Array<{ artist: string }>,
-  preferredArtistKeys: string[]
-): number {
-  if (preferredArtistKeys.length === 0) return 0;
-  return rows.reduce((count, row) => count + (artistMatchesPreferred(row.artist, preferredArtistKeys) ? 1 : 0), 0);
-}
-
-function countUniquePreferredArtists(
-  rows: Array<{ artist: string }>,
-  preferredArtistKeys: string[]
-): number {
-  if (preferredArtistKeys.length === 0) return 0;
-  const matched = new Set<string>();
-  for (const row of rows) {
-    const normalizedArtist = normalizeArtistKey(row.artist);
-    if (!normalizedArtist) continue;
-    for (const preferred of preferredArtistKeys) {
-      if (normalizedArtist === preferred || normalizedArtist.includes(preferred)) {
-        matched.add(preferred);
-      }
-    }
-  }
-  return matched.size;
 }
 
 function isMainstreamStudioPrompt(prompt: string | undefined): boolean {
@@ -193,27 +165,33 @@ function isMainstreamStudioPrompt(prompt: string | undefined): boolean {
 function getStudioSeedQualityScore(
   track: StudioSeedTrack,
   preferredArtistKeys: string[],
-  mainstreamPrompt: boolean
+  mainstreamPrompt: boolean,
+  wantsClassicalMusic: boolean
 ): number {
   const artist = track.artist;
   const title = track.title;
   let score = 0;
 
-  if (artistMatchesPreferred(artist, preferredArtistKeys)) score += 12;
+  if (artistMatchesPreferred(artist, preferredArtistKeys)) score += 2;
   if (track.source === 'discogs') score += mainstreamPrompt ? 5 : 2;
+  if (track.source === 'musicbrainz' && typeof track.mbArtistFrequency === 'number' && Number.isFinite(track.mbArtistFrequency)) {
+    score += Math.min(10, Math.log2(Math.max(1, track.mbArtistFrequency) + 1) * 2.5);
+  }
   if (isLikelySongRecording(artist, title)) score += 3;
+  if (wantsClassicalMusic && isLikelyClassicalOrScoreRecording(artist, title)) score += 18;
+  if (wantsClassicalMusic && !isLikelyClassicalOrScoreRecording(artist, title)) score -= 6;
   if (isVariantStudioTitle(title)) score -= 10;
 
   const artistCommaCount = (artist.match(/,/g) || []).length;
   if (artistCommaCount >= 2) score -= 8;
-  if (title.includes(':')) score -= 6;
+  if (title.includes(':') && !wantsClassicalMusic) score -= 6;
   if (artist.length >= 60) score -= 4;
   if (title.length >= 70) score -= 4;
 
   const artistLower = artist.toLowerCase();
   const titleLower = title.toLowerCase();
-  if (/\b(orchestra|symphony|philharmonic|choir|ensemble|quartet|quintet|conductor)\b/.test(artistLower)) score -= 10;
-  if (/\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+|recitativo|aria|overture)\b/.test(titleLower)) score -= 10;
+  if (!wantsClassicalMusic && /\b(orchestra|symphony|philharmonic|choir|ensemble|quartet|quintet|conductor)\b/.test(artistLower)) score -= 10;
+  if (!wantsClassicalMusic && /\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+|recitativo|aria|overture)\b/.test(titleLower)) score -= 10;
 
   return score;
 }
@@ -221,12 +199,13 @@ function getStudioSeedQualityScore(
 function prioritizeStudioSeedTracks(
   tracks: StudioSeedTrack[],
   preferredArtistKeys: string[],
-  mainstreamPrompt: boolean
+  mainstreamPrompt: boolean,
+  wantsClassicalMusic: boolean
 ): StudioSeedTrack[] {
   const scored = tracks.map((track, index) => ({
     track,
     index,
-    score: getStudioSeedQualityScore(track, preferredArtistKeys, mainstreamPrompt),
+    score: getStudioSeedQualityScore(track, preferredArtistKeys, mainstreamPrompt, wantsClassicalMusic),
   }));
 
   scored.sort((a, b) => {
@@ -318,8 +297,8 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   const identityPreferredArtists = Array.isArray(resolved?.preferredArtists)
     ? resolved.preferredArtists.map((value) => canonicalizeDisplayName(value || '')).filter((value) => value.length > 0)
     : [];
-  const mainstreamPrompt = isMainstreamStudioPrompt(params.prompt);
   const wantsClassicalMusic = promptWantsClassicalMusic(params.prompt);
+  const mainstreamPrompt = isMainstreamStudioPrompt(params.prompt) && !wantsClassicalMusic;
   const effectiveArtistHints = Array.from(
     new Set([
       ...artistHints,
@@ -349,14 +328,76 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   if (musicBrainzEnabled) {
     attemptedMusicBrainz = true;
     try {
-      const preferredPlaceId = typeof resolved?.musicBrainzPlaceId === 'string' ? resolved.musicBrainzPlaceId.trim() : '';
-      const resolvedPlace = preferredPlaceId
-        ? { id: preferredPlaceId, name: studioName, score: 100, type: 'Studio', disambiguation: '' }
-        : await resolveMusicBrainzStudioPlace(studioName, acceptedStudioNames);
-      if (resolvedPlace) {
-        musicBrainzPlaceId = resolvedPlace.id;
-        musicBrainzPlaceName = resolvedPlace.name;
-        const mbTracks = await fetchMusicBrainzStudioTracksByPlace(resolvedPlace.id, Math.max(limit * 12, 320));
+      const explicitPlaceIds = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(resolved?.musicBrainzPlaceIds) ? resolved.musicBrainzPlaceIds : []),
+            typeof resolved?.musicBrainzPlaceId === 'string' ? resolved.musicBrainzPlaceId : '',
+          ]
+            .map((value) => String(value || '').trim())
+            .filter((value) => value.length > 0)
+        )
+      );
+
+      const discoveredPlaces = await resolveMusicBrainzStudioPlaces(studioName, acceptedStudioNames, 5);
+      const placeCandidates = wantsClassicalMusic
+        ? [
+          ...discoveredPlaces,
+          ...explicitPlaceIds.map((id) => ({ id, name: studioName, score: 100, type: 'Studio', disambiguation: '' })),
+        ]
+        : [
+          ...explicitPlaceIds.map((id) => ({ id, name: studioName, score: 100, type: 'Studio', disambiguation: '' })),
+          ...discoveredPlaces,
+        ];
+
+      const uniquePlaces = new Map<string, { id: string; name: string; score: number; type: string; disambiguation: string }>();
+      for (const place of placeCandidates) {
+        const existing = uniquePlaces.get(place.id);
+        if (!existing || place.score > existing.score) {
+          uniquePlaces.set(place.id, place);
+        }
+      }
+
+      const rankedPlaces = Array.from(uniquePlaces.values())
+        .sort((a, b) => b.score - a.score)
+        .slice(0, mainstreamPrompt ? 3 : 4);
+
+      if (rankedPlaces.length > 0) {
+        musicBrainzPlaceId = rankedPlaces[0].id;
+        musicBrainzPlaceName = rankedPlaces[0].name;
+
+        const mbTracks: Array<{
+          placeId: string;
+          artist: string;
+          title: string;
+          recordingMbid: string;
+          begin: string | null;
+          end: string | null;
+        }> = [];
+
+        const maxSeed = Math.max(limit * 12, 320);
+        const perPlaceLimit = Math.max(120, Math.floor(maxSeed / Math.max(1, rankedPlaces.length)));
+        for (const place of rankedPlaces) {
+          const rows = await fetchMusicBrainzStudioTracksByPlace(place.id, perPlaceLimit);
+          for (const row of rows) {
+            mbTracks.push({
+              placeId: place.id,
+              artist: row.artist,
+              title: row.title,
+              recordingMbid: row.recordingMbid,
+              begin: row.begin,
+              end: row.end,
+            });
+          }
+        }
+
+        const mbArtistFrequency = new Map<string, number>();
+        for (const row of mbTracks) {
+          const artistKey = normalizeArtistKey(canonicalizeDisplayName(row.artist || ''));
+          if (!artistKey) continue;
+          mbArtistFrequency.set(artistKey, (mbArtistFrequency.get(artistKey) || 0) + 1);
+        }
+
         const mbSeed: StudioSeedTrack[] = [];
         for (let index = 0; index < mbTracks.length; index += 1) {
           const row = mbTracks[index];
@@ -364,8 +405,8 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
           const title = (row.title || '').trim();
           if (!artist || !title) continue;
           if (isVariantStudioTitle(title)) continue;
-          if (!isLikelySongRecording(artist, title)) continue;
-          if (!shouldKeepStudioTrackByClassicalPolicy(artist, title, wantsClassicalMusic, preferredArtistKeys)) continue;
+          if (!wantsClassicalMusic && !isLikelySongRecording(artist, title)) continue;
+          if (!shouldKeepStudioTrackByClassicalPolicy(artist, title, wantsClassicalMusic)) continue;
 
           const year = extractYear(row.begin) ?? extractYear(row.end);
           if (year !== null) {
@@ -373,15 +414,19 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
             if (typeof activeEndYear === 'number' && year > activeEndYear) continue;
           }
 
+          const artistKey = normalizeArtistKey(artist);
+          const artistFrequency = artistKey ? (mbArtistFrequency.get(artistKey) || 0) : 0;
+
           mbSeed.push({
             artist,
             title,
             studioName,
             releaseId: 10_000_000 + index,
             releaseTitle: 'MusicBrainz recorded-at relation',
-            sourceRef: `musicbrainz:place:${resolvedPlace.id}:recording:${row.recordingMbid}`,
+            sourceRef: `musicbrainz:place:${row.placeId}:recording:${row.recordingMbid}`,
             source: 'musicbrainz',
             recordedYear: year ?? undefined,
+            mbArtistFrequency: artistFrequency,
           });
         }
 
@@ -402,17 +447,9 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   }
 
   const minimumBreadthTarget = Math.min(8, Math.max(4, Math.floor(limit / 3)));
-  const preferredMatchTarget = Math.min(8, Math.max(3, Math.floor(limit / 2)));
-  const preferredMatchCount = countPreferredArtistMatches(studioTracks, preferredArtistKeys);
-  const uniquePreferredArtists = countUniquePreferredArtists(studioTracks, preferredArtistKeys);
-  const preferredArtistVarietyTarget = Math.min(4, preferredArtistKeys.length);
   const shouldUseDiscogsFallback =
     studioTracks.length < Math.min(40, limit)
-    || countUniqueArtists(studioTracks) < minimumBreadthTarget
-    || (mainstreamPrompt && preferredArtistKeys.length > 0 && (
-      preferredMatchCount < preferredMatchTarget
-      || uniquePreferredArtists < preferredArtistVarietyTarget
-    ));
+    || countUniqueArtists(studioTracks) < minimumBreadthTarget;
 
   if (discogsEnabled && shouldUseDiscogsFallback) {
     attemptedDiscogs = true;
@@ -548,7 +585,8 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
         .filter((row) => {
           if (!row.artist || !row.title) return false;
           if (isVariantStudioTitle(row.title)) return false;
-          return shouldKeepStudioTrackByClassicalPolicy(row.artist, row.title, wantsClassicalMusic, preferredArtistKeys);
+          if (!wantsClassicalMusic && !isLikelySongRecording(row.artist, row.title)) return false;
+          return shouldKeepStudioTrackByClassicalPolicy(row.artist, row.title, wantsClassicalMusic);
         });
 
       const mergedByKey = new Map<string, StudioSeedTrack>();
@@ -565,7 +603,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     }
   }
 
-  studioTracks = prioritizeStudioSeedTracks(studioTracks, preferredArtistKeys, mainstreamPrompt);
+  studioTracks = prioritizeStudioSeedTracks(studioTracks, preferredArtistKeys, mainstreamPrompt, wantsClassicalMusic);
 
   const curatedRecordedTracks = Array.isArray(params.curatedRecordedTracks)
     ? params.curatedRecordedTracks

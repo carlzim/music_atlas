@@ -7,6 +7,7 @@ export interface StudioIdentity {
   successorNames: string[];
   discogsLabelId?: number;
   musicBrainzPlaceId?: string;
+  musicBrainzPlaceIds?: string[];
   preferredArtists?: string[];
   activeStartYear?: number;
   activeEndYear?: number;
@@ -74,6 +75,12 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
     ],
     successorNames: [],
     musicBrainzPlaceId: 'bd55aeb7-19d1-4607-a500-14b8479d3fed',
+    musicBrainzPlaceIds: [
+      '6f12a5d2-52e5-4dec-9fed-494b1f65bb94',
+      'c56fdea4-e81e-439a-a183-a52eb1141409',
+      '2d9b9649-6f1d-4671-a859-f283192132b5',
+      'bd55aeb7-19d1-4607-a500-14b8479d3fed',
+    ],
     activeStartYear: 1960,
     preferredArtists: [
       'The Beatles',
@@ -214,6 +221,7 @@ export interface ResolvedStudioIdentity {
   excludedSuccessorNames: string[];
   discogsLabelId?: number;
   musicBrainzPlaceId?: string;
+  musicBrainzPlaceIds?: string[];
   preferredArtists: string[];
   activeStartYear?: number;
   activeEndYear?: number;
@@ -228,6 +236,9 @@ function toResolvedStudioIdentity(compiled: CompiledStudioIdentity): ResolvedStu
     excludedSuccessorNames: [...compiled.identity.successorNames],
     discogsLabelId: compiled.identity.discogsLabelId,
     musicBrainzPlaceId: compiled.identity.musicBrainzPlaceId,
+    musicBrainzPlaceIds: Array.isArray(compiled.identity.musicBrainzPlaceIds)
+      ? [...compiled.identity.musicBrainzPlaceIds]
+      : undefined,
     preferredArtists: [...(compiled.identity.preferredArtists || [])],
     activeStartYear: compiled.identity.activeStartYear,
     activeEndYear: compiled.identity.activeEndYear,

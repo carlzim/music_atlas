@@ -1727,7 +1727,7 @@ app.get('/api/playlists/:id', (req, res) => {
   const id = parseInt(req.params.id);
   const playlist = getPlaylistById(id);
   
-  if (!playlist) {
+  if (!playlist || /^\s*\[system\]/i.test(playlist.prompt || '')) {
     res.status(404).json({ error: 'Playlist not found' });
     return;
   }

@@ -62,6 +62,33 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
     ],
   },
   {
+    key: 'abbey_road_studios_london',
+    primaryName: 'Abbey Road Studios, London',
+    aliases: [
+      'Abbey Road Studios',
+      'Abbey Road Studios London',
+      'Abbey Road, London',
+      'EMI Studios, London',
+      'EMI Studios London',
+      'EMI Recording Studios, London',
+    ],
+    successorNames: [],
+    musicBrainzPlaceId: 'bd55aeb7-19d1-4607-a500-14b8479d3fed',
+    activeStartYear: 1960,
+    preferredArtists: [
+      'The Beatles',
+      'Pink Floyd',
+      'Radiohead',
+      'Oasis',
+      'Amy Winehouse',
+      'Duran Duran',
+      'Kate Bush',
+      'George Harrison',
+      'Paul McCartney',
+      'John Lennon',
+    ],
+  },
+  {
     key: 'gold_star_studios_los_angeles',
     primaryName: 'Gold Star Studios',
     aliases: [

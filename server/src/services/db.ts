@@ -1245,6 +1245,7 @@ export function getAllPlaylists(): Omit<PlaylistRow, 'tracks'>[] {
   const stmt = db.prepare(`
     select id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at 
     FROM playlists 
+    WHERE prompt NOT LIKE '[system]%'
     ORDER BY created_at DESC 
     LIMIT 20
   `);
@@ -1345,6 +1346,7 @@ export function getRelatedPlaylists(playlistId: number): Omit<PlaylistRow, 'trac
     SELECT id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at
     FROM playlists
     WHERE id != ?
+      AND prompt NOT LIKE '[system]%'
   `);
 
   const rows = stmt.all(playlistId) as Omit<PlaylistRow, 'tracks'>[];
@@ -1373,9 +1375,13 @@ export function getRelatedPlaylists(playlistId: number): Omit<PlaylistRow, 'trac
 }
 
 export function getPlaylistsByTag(tag: string): Omit<PlaylistRow, 'tracks'>[] {
+  const target = normalizeTagForComparison(formatTagForDisplay(tag));
+  if (!target) return [];
+
   const stmt = db.prepare(`
     SELECT id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at
     FROM playlists
+    WHERE prompt NOT LIKE '[system]%'
     ORDER BY created_at DESC
   `);
 
@@ -1386,7 +1392,12 @@ export function getPlaylistsByTag(tag: string): Omit<PlaylistRow, 'tracks'>[] {
       if (!row.tags) return false;
       try {
         const parsed = JSON.parse(row.tags);
-        return Array.isArray(parsed) && parsed.includes(tag);
+        if (!Array.isArray(parsed)) return false;
+        return parsed.some((item: unknown) => {
+          if (typeof item !== 'string') return false;
+          const normalized = normalizeTagForComparison(formatTagForDisplay(item));
+          return normalized === target;
+        });
       } catch {
         return false;
       }
@@ -1398,6 +1409,7 @@ export function getPlaylistsByPlace(place: string): Omit<PlaylistRow, 'tracks'>[
   const stmt = db.prepare(`
     SELECT id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at
     FROM playlists
+    WHERE prompt NOT LIKE '[system]%'
     ORDER BY created_at DESC
   `);
 
@@ -1413,6 +1425,7 @@ export function getPlaylistsByScene(scene: string): Omit<PlaylistRow, 'tracks'>[
   const stmt = db.prepare(`
     SELECT id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at
     FROM playlists
+    WHERE prompt NOT LIKE '[system]%'
     ORDER BY created_at DESC
   `);
 
@@ -1882,10 +1895,10 @@ export function getEquipmentAtlas(name: string): {
 }
 
 export function getTopTags(limit = 12): Array<{ tag: string; count: number }> {
-  const stmt = db.prepare('SELECT tags FROM playlists');
+  const stmt = db.prepare("SELECT tags FROM playlists WHERE prompt NOT LIKE '[system]%'");
   const rows = stmt.all() as Array<{ tags: string | null }>;
 
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { tag: string; count: number }>();
 
   for (const row of rows) {
     if (!row.tags) continue;
@@ -1894,23 +1907,30 @@ export function getTopTags(limit = 12): Array<{ tag: string; count: number }> {
       if (!Array.isArray(parsed)) continue;
       for (const tag of parsed) {
         if (typeof tag !== 'string' || tag.length === 0) continue;
-        counts.set(tag, (counts.get(tag) || 0) + 1);
+        const cleaned = formatTagForDisplay(tag);
+        const key = normalizeTagForComparison(cleaned);
+        if (!cleaned || !key || cleaned.startsWith('system')) continue;
+        const existing = counts.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          counts.set(key, { tag: cleaned, count: 1 });
+        }
       }
     } catch {
       continue;
     }
   }
 
-  return Array.from(counts.entries())
-    .map(([tag, count]) => ({ tag, count }))
+  return Array.from(counts.values())
     .sort((a, b) => b.count - a.count)
     .slice(0, limit);
 }
 
 export function getKnownTags(): string[] {
-  const stmt = db.prepare('SELECT tags FROM playlists');
+  const stmt = db.prepare("SELECT tags FROM playlists WHERE prompt NOT LIKE '[system]%'");
   const rows = stmt.all() as Array<{ tags: string | null }>;
-  const known = new Set<string>();
+  const known = new Map<string, string>();
 
   for (const row of rows) {
     if (!row.tags) continue;
@@ -1919,16 +1939,17 @@ export function getKnownTags(): string[] {
       if (!Array.isArray(parsed)) continue;
       for (const tag of parsed) {
         if (typeof tag !== 'string') continue;
-        const trimmed = tag.trim();
-        if (!trimmed) continue;
-        known.add(trimmed);
+        const cleaned = formatTagForDisplay(tag);
+        const key = normalizeTagForComparison(cleaned);
+        if (!cleaned || !key || cleaned.startsWith('system')) continue;
+        if (!known.has(key)) known.set(key, cleaned);
       }
     } catch {
       continue;
     }
   }
 
-  return Array.from(known);
+  return Array.from(known.values());
 }
 
 function normalizeTagForComparison(tag: string): string {
@@ -1938,6 +1959,15 @@ function normalizeTagForComparison(tag: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+function formatTagForDisplay(tag: string): string {
+  return canonicalizeDisplayName(tag)
+    .replace(/[_-]+/g, ' ')
+    .replace(/[.,;:!?/\\|()[\]{}]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 export function getDuplicateTagCandidates(): Array<{ normalized: string; tags: string[] }> {
@@ -1970,7 +2000,7 @@ export function mergeTagExact(source: string, target: string): { updatedPlaylist
     return { updatedPlaylists: 0 };
   }
 
-  const selectStmt = db.prepare('SELECT id, tags FROM playlists');
+  const selectStmt = db.prepare("SELECT id, tags FROM playlists WHERE prompt NOT LIKE '[system]%'");
   const updateStmt = db.prepare('UPDATE playlists SET tags = ? WHERE id = ?');
   const rows = selectStmt.all() as Array<{ id: number; tags: string | null }>;
 
@@ -2019,9 +2049,9 @@ export function mergeTagExact(source: string, target: string): { updatedPlaylist
 }
 
 export function getTagStats(): Array<{ tag: string; count: number }> {
-  const stmt = db.prepare('SELECT tags FROM playlists');
+  const stmt = db.prepare("SELECT tags FROM playlists WHERE prompt NOT LIKE '[system]%'");
   const rows = stmt.all() as Array<{ tags: string | null }>;
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { tag: string; count: number }>();
 
   for (const row of rows) {
     if (!row.tags) continue;
@@ -2037,12 +2067,19 @@ export function getTagStats(): Array<{ tag: string; count: number }> {
 
     for (const item of parsed) {
       if (typeof item !== 'string') continue;
-      counts.set(item, (counts.get(item) || 0) + 1);
+      const cleaned = formatTagForDisplay(item);
+      const key = normalizeTagForComparison(cleaned);
+      if (!cleaned || !key || cleaned.startsWith('system')) continue;
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(key, { tag: cleaned, count: 1 });
+      }
     }
   }
 
-  return Array.from(counts.entries())
-    .map(([tag, count]) => ({ tag, count }))
+  return Array.from(counts.values())
     .sort((a, b) => b.count - a.count);
 }
 

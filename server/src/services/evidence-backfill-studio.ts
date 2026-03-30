@@ -120,6 +120,40 @@ function isLikelySongRecording(artist: string, title: string): boolean {
   return true;
 }
 
+function promptWantsClassicalMusic(prompt: string | undefined): boolean {
+  const value = (prompt || '').toLowerCase();
+  if (!value) return false;
+  return /\bclassical\b|\borchestral\b|\bsymphon(?:y|ic)\b|\bconcerto\b|\bsonata\b|\bchamber\b|\bbaroque\b|\bopera\b|\bfilm score\b|\bsoundtrack\b/.test(value);
+}
+
+function isLikelyClassicalOrScoreRecording(artist: string, title: string): boolean {
+  const artistLower = artist.toLowerCase();
+  const titleLower = title.toLowerCase();
+
+  if (/\b(orchestra|symphony|philharmonic|choir|ensemble|quartet|quintet|conductor|maestro)\b/.test(artistLower)) return true;
+  if (/\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+|recitativo|aria|overture|requiem|nocturne|etude|waltz|prelude|fugue|scherzo)\b/.test(titleLower)) return true;
+  if (/\b(op\.?\s*\d+|no\.?\s*\d+|d\.?\s*\d+|k\.?\s*\d+|kv\.?\s*\d+|bwv\s*\d+)\b/.test(titleLower)) return true;
+  if (/\b(der|die|das)\s+[a-zäöüß]+\b/.test(titleLower) && /\bd\.?\s*\d+\b/.test(titleLower)) return true;
+  if (/\b(original motion picture soundtrack|motion picture|film score|soundtrack)\b/.test(titleLower)) return true;
+  if (title.includes(':')) return true;
+  if ((artist.split(',').length - 1) >= 1 && /\b(op\.|d\.|bwv|kv)\b/.test(titleLower)) return true;
+
+  return false;
+}
+
+function shouldKeepStudioTrackByClassicalPolicy(
+  artist: string,
+  title: string,
+  wantsClassicalMusic: boolean,
+  preferredArtistKeys: string[]
+): boolean {
+  if (wantsClassicalMusic) return true;
+  if (!isLikelyClassicalOrScoreRecording(artist, title)) return true;
+
+  // Conservative exception: only keep if it clearly maps to a preferred mainstream artist.
+  return artistMatchesPreferred(artist, preferredArtistKeys);
+}
+
 function countUniqueArtists(rows: Array<{ artist: string }>): number {
   return new Set(rows.map((row) => row.artist.trim().toLowerCase()).filter(Boolean)).size;
 }
@@ -285,6 +319,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     ? resolved.preferredArtists.map((value) => canonicalizeDisplayName(value || '')).filter((value) => value.length > 0)
     : [];
   const mainstreamPrompt = isMainstreamStudioPrompt(params.prompt);
+  const wantsClassicalMusic = promptWantsClassicalMusic(params.prompt);
   const effectiveArtistHints = Array.from(
     new Set([
       ...artistHints,
@@ -330,6 +365,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
           if (!artist || !title) continue;
           if (isVariantStudioTitle(title)) continue;
           if (!isLikelySongRecording(artist, title)) continue;
+          if (!shouldKeepStudioTrackByClassicalPolicy(artist, title, wantsClassicalMusic, preferredArtistKeys)) continue;
 
           const year = extractYear(row.begin) ?? extractYear(row.end);
           if (year !== null) {
@@ -507,8 +543,13 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
         releaseId: row.releaseId,
         releaseTitle: row.releaseTitle,
         sourceRef: row.sourceRef,
-        source: 'discogs',
-      }));
+        source: 'discogs' as const,
+      }))
+        .filter((row) => {
+          if (!row.artist || !row.title) return false;
+          if (isVariantStudioTitle(row.title)) return false;
+          return shouldKeepStudioTrackByClassicalPolicy(row.artist, row.title, wantsClassicalMusic, preferredArtistKeys);
+        });
 
       const mergedByKey = new Map<string, StudioSeedTrack>();
       const sourcePriority = mainstreamPrompt ? [...discogsSeed, ...studioTracks] : [...studioTracks, ...discogsSeed];

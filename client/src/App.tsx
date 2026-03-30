@@ -319,14 +319,27 @@ const FEATURED_PATHS: Array<{ label: string; to: string }> = [
 
 function parseTagList(rawTags: string | null | undefined): string[] {
   if (!rawTags) return [];
+
+  const formatTagForDisplay = (value: string): string => {
+    return value
+      .trim()
+      .replace(/[_-]+/g, ' ')
+      .replace(/[.,;:!?/\\|()[\]{}]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  };
+
   try {
     const parsed = JSON.parse(rawTags);
-    return Array.isArray(parsed)
+    const tags = Array.isArray(parsed)
       ? parsed
           .filter((item): item is string => typeof item === 'string')
-          .map((item) => item.trim())
+          .map((item) => formatTagForDisplay(item))
+          .filter((item) => item.length > 0 && !item.startsWith('system'))
           .filter((item) => item.length > 0)
       : [];
+    return Array.from(new Set(tags));
   } catch {
     return [];
   }

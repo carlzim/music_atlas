@@ -1442,6 +1442,28 @@ function studioArtistMatchesPreferred(artist: string, preferredArtistKeys: strin
   return preferredArtistKeys.some((preferred) => normalizedArtist === preferred || normalizedArtist.includes(preferred));
 }
 
+function promptWantsClassicalMusic(prompt: string): boolean {
+  const value = normalize(prompt);
+  if (!value) return false;
+  return /\bclassical\b|\borchestral\b|\bsymphon(?:y|ic)\b|\bconcerto\b|\bsonata\b|\bchamber\b|\bbaroque\b|\bopera\b|\bfilm score\b|\bsoundtrack\b/.test(value);
+}
+
+function isLikelyClassicalOrScoreTrack(artistName: string, songTitle: string): boolean {
+  const artist = normalizeArtistIdentity(artistName);
+  const title = normalize(songTitle);
+  if (!artist && !title) return false;
+
+  if (/\b(orchestra|symphony|philharmonic|choir|ensemble|quartet|quintet|conductor|maestro)\b/.test(artist)) return true;
+  if (/\b(op\.|opus|concerto|sonata|suite|movement|act\s+\d+|scene\s+\d+|recitativo|aria|overture|requiem|nocturne|etude|waltz|prelude|fugue|scherzo)\b/.test(title)) return true;
+  if (/\b(op\.?\s*\d+|no\.?\s*\d+|d\.?\s*\d+|k\.?\s*\d+|kv\.?\s*\d+|bwv\s*\d+)\b/.test(title)) return true;
+  if (/\b(der|die|das)\s+[a-zäöüß]+\b/.test(title) && /\bd\.?\s*\d+\b/.test(title)) return true;
+  if (/\b(original motion picture soundtrack|motion picture|film score|soundtrack)\b/.test(title)) return true;
+  if (songTitle.includes(':')) return true;
+  if ((artistName.split(',').length - 1) >= 1 && /\b(op\.|d\.|bwv|kv)\b/.test(title)) return true;
+
+  return false;
+}
+
 function foldForCreditEvidenceMatch(value: string): string {
   return value
     .normalize('NFD')
@@ -1725,6 +1747,7 @@ async function rankStudioTracksByRecognition(
   if (tracks.length <= 1) return tracks;
 
   const mainstreamPrompt = /\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/i.test(_prompt);
+  const wantsClassicalMusic = promptWantsClassicalMusic(_prompt);
   const preferredArtistKeys = Array.from(preferredArtists)
     .map((value) => normalizeArtistIdentity(value))
     .filter((value) => value.length > 0);
@@ -1740,10 +1763,11 @@ async function rankStudioTracksByRecognition(
       ? Math.floor(track.release_year)
       : null;
     const yearBoost = releaseYear !== null && releaseYear >= 1955 && releaseYear <= 1999 ? 1 : 0;
+    const classicalPenalty = !wantsClassicalMusic && isLikelyClassicalOrScoreTrack(track.artist, track.song) ? 16 : 0;
     const mainstreamPenalty = mainstreamPrompt && preferredArtistKeys.length > 0 && !matchesPreferredArtist
       ? 2
       : 0;
-    const finalScore = preferredArtistBoost + yearBoost - variantPenalty - commercialPenalty - mainstreamPenalty;
+    const finalScore = preferredArtistBoost + yearBoost - variantPenalty - commercialPenalty - mainstreamPenalty - classicalPenalty;
     return { track, index, finalScore, recognitionScore: 0 };
   });
 
@@ -1926,15 +1950,25 @@ function normalizeTagForComparison(tag: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
+function formatTagForDisplay(tag: string): string {
+  return canonicalizeDisplayName(tag)
+    .replace(/[_-]+/g, ' ')
+    .replace(/[.,;:!?/\\|()[\]{}]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function canonicalizeGeneratedTags(generatedTags: string[]): string[] {
   const existingTags = getKnownTags();
   const existingByKey = new Map<string, string>();
 
   for (const tag of existingTags) {
-    const key = normalizeTagForComparison(tag);
+    const formatted = formatTagForDisplay(tag);
+    const key = normalizeTagForComparison(formatted);
     if (!key) continue;
     if (!existingByKey.has(key)) {
-      existingByKey.set(key, tag);
+      existingByKey.set(key, formatted);
     }
   }
 
@@ -1942,11 +1976,12 @@ function canonicalizeGeneratedTags(generatedTags: string[]): string[] {
   const seen = new Set<string>();
 
   for (const tag of generatedTags) {
-    const trimmed = tag.trim();
+    const trimmed = formatTagForDisplay(tag);
     if (!trimmed) continue;
 
     const key = normalizeTagForComparison(trimmed);
     if (!key) continue;
+    if (key.startsWith('system')) continue;
 
     const canonical = existingByKey.get(key) || trimmed;
     const canonicalKey = normalizeTagForComparison(canonical);
@@ -3304,6 +3339,15 @@ function applyStudioArtistDiversity(tracks: Track[]): Track[] {
   }
 
   return chosen.length > 0 ? chosen : tracks;
+}
+
+function applyStudioClassicalPolicy(prompt: string, tracks: Track[]): Track[] {
+  if (tracks.length <= 1) return tracks;
+  if (promptWantsClassicalMusic(prompt)) return tracks;
+
+  const filtered = tracks.filter((track) => !isLikelyClassicalOrScoreTrack(track.artist, track.song));
+  if (filtered.length >= MIN_PLAYLIST_TRACKS) return filtered;
+  return filtered.length > 0 ? filtered : tracks;
 }
 
 function staggerArtistsForFlow(tracks: Track[]): Track[] {
@@ -4716,6 +4760,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const preferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
     playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
     playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
+    playlist.tracks = applyStudioClassicalPolicy(translatedPrompt, playlist.tracks);
     playlist.tracks = applyStudioCuratedTrackWhitelist(constraint, playlist.tracks);
     playlist.tracks = applyStudioArtistDiversity(playlist.tracks);
     playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, preferredStudioArtists);

@@ -18,6 +18,7 @@ interface Track {
   artist_display?: string;
   spotify_url?: string | null;
   album_image_url?: string | null;
+  album_title?: string | null;
   release_year?: number | null;
 }
 
@@ -1782,6 +1783,9 @@ async function rankStudioTracksByRecognition(
       item.finalScore += Math.min(8, recognition / 20);
       if (info?.spotify_url && !item.track.spotify_url) item.track.spotify_url = info.spotify_url;
       if (info?.album_image_url && !item.track.album_image_url) item.track.album_image_url = info.album_image_url;
+      if (typeof info?.matchedAlbumTitle === 'string' && info.matchedAlbumTitle.trim().length > 0 && !item.track.album_title) {
+        item.track.album_title = info.matchedAlbumTitle.trim();
+      }
       if (typeof info?.release_year === 'number' && typeof item.track.release_year !== 'number') {
         item.track.release_year = info.release_year;
       }
@@ -2414,6 +2418,9 @@ function dedupeTracks(tracks: Track[]): Track[] {
       continue;
     }
     if (existing.album_image_url && !track.album_image_url) {
+      continue;
+    }
+    if (existing.album_title && !track.album_title) {
       continue;
     }
 
@@ -3208,29 +3215,83 @@ function applyStudioArtistDiversity(tracks: Track[]): Track[] {
   const chosen: Track[] = [];
   const chosenKeys = new Set<string>();
   const artistCounts = new Map<string, number>();
+  const artistAlbumCounts = new Map<string, number>();
+  const unknownAlbumCountsByArtist = new Map<string, number>();
+
+  const albumSetsByArtist = new Map<string, Set<string>>();
+  for (const track of tracks) {
+    const artistKey = normalizeArtistIdentity(track.artist);
+    if (!artistKey) continue;
+    const albumKey = normalize(track.album_title || track.album_image_url || '');
+    if (!albumKey) continue;
+    if (!albumSetsByArtist.has(artistKey)) albumSetsByArtist.set(artistKey, new Set<string>());
+    albumSetsByArtist.get(artistKey)?.add(albumKey);
+  }
 
   const getTrackKey = (track: Track): string => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+  const getAlbumKey = (track: Track): string => normalize(track.album_title || track.album_image_url || '');
+  const getArtistAlbumKey = (track: Track): string => {
+    const artistKey = normalizeArtistIdentity(track.artist);
+    if (!artistKey) return '';
+    const albumKey = getAlbumKey(track);
+    return `${artistKey}::${albumKey || '__unknown_album__'}`;
+  };
 
-  const addWithArtistCap = (artistCap: number): void => {
+  const addWithCaps = (artistCap: number, allowUnknownAlbumRepeats: boolean): void => {
     for (const track of tracks) {
       if (chosen.length >= desiredCount) break;
       const trackKey = getTrackKey(track);
       if (!trackKey || chosenKeys.has(trackKey)) continue;
+
       const artistKey = normalizeArtistIdentity(track.artist);
       if (!artistKey) continue;
       const artistCount = artistCounts.get(artistKey) || 0;
       if (artistCount >= artistCap) continue;
 
+      const artistAlbumKey = getArtistAlbumKey(track);
+      if (artistAlbumKey && artistAlbumCounts.has(artistAlbumKey)) continue;
+
+      const albumKey = getAlbumKey(track);
+      if (!albumKey) {
+        const unknownUsed = unknownAlbumCountsByArtist.get(artistKey) || 0;
+        const knownAlbumCount = albumSetsByArtist.get(artistKey)?.size || 0;
+        const canRepeatUnknown = allowUnknownAlbumRepeats && knownAlbumCount === 0;
+        if (unknownUsed >= 1 && !canRepeatUnknown) continue;
+      }
+
       chosen.push(track);
       chosenKeys.add(trackKey);
       artistCounts.set(artistKey, artistCount + 1);
+      if (artistAlbumKey) {
+        artistAlbumCounts.set(artistAlbumKey, (artistAlbumCounts.get(artistAlbumKey) || 0) + 1);
+      }
+      if (!albumKey) {
+        unknownAlbumCountsByArtist.set(artistKey, (unknownAlbumCountsByArtist.get(artistKey) || 0) + 1);
+      }
     }
   };
 
-  addWithArtistCap(1);
-  if (chosen.length < desiredCount) addWithArtistCap(2);
-  if (chosen.length < desiredCount) addWithArtistCap(3);
-  if (chosen.length < desiredCount) addWithArtistCap(5);
+  addWithCaps(1, false);
+  if (chosen.length < desiredCount) addWithCaps(2, false);
+  if (chosen.length < desiredCount) addWithCaps(3, false);
+  if (chosen.length < desiredCount) addWithCaps(4, true);
+
+  if (chosen.length < desiredCount) {
+    for (const track of tracks) {
+      if (chosen.length >= desiredCount) break;
+      const trackKey = getTrackKey(track);
+      if (!trackKey || chosenKeys.has(trackKey)) continue;
+
+       const artistAlbumKey = getArtistAlbumKey(track);
+       if (artistAlbumKey && artistAlbumCounts.has(artistAlbumKey)) continue;
+
+      chosen.push(track);
+      chosenKeys.add(trackKey);
+      if (artistAlbumKey) {
+        artistAlbumCounts.set(artistAlbumKey, (artistAlbumCounts.get(artistAlbumKey) || 0) + 1);
+      }
+    }
+  }
 
   if (chosen.length < desiredCount) {
     for (const track of tracks) {

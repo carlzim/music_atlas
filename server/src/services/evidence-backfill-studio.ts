@@ -91,6 +91,18 @@ function artistMatchesPreferred(artist: string, preferredArtistKeys: string[]): 
   return preferredArtistKeys.some((preferred) => normalizedArtist === preferred || normalizedArtist.includes(preferred));
 }
 
+function artistMatchesAnchors(artist: string, anchorKeys: Set<string>): boolean {
+  if (anchorKeys.size === 0) return false;
+  const normalizedArtist = normalizeArtistKey(artist);
+  if (!normalizedArtist) return false;
+  for (const anchor of anchorKeys) {
+    if (normalizedArtist === anchor || normalizedArtist.includes(anchor) || anchor.includes(normalizedArtist)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function extractYear(value: string | null | undefined): number | null {
   if (!value) return null;
   const match = value.match(/\b(19\d{2}|20\d{2})\b/);
@@ -159,7 +171,7 @@ function countUniqueArtists(rows: Array<{ artist: string }>): number {
 function isMainstreamStudioPrompt(prompt: string | undefined): boolean {
   const value = (prompt || '').toLowerCase();
   if (!value) return false;
-  return /\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/.test(value);
+  return /\bbest\b|\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\btop\b|\bgreatest\b|\bmegaklassiker\b/.test(value);
 }
 
 function getStudioSeedQualityScore(
@@ -396,7 +408,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
 
       const rankedPlaces = Array.from(uniquePlaces.values())
         .sort((a, b) => b.score - a.score)
-        .slice(0, mainstreamPrompt ? 3 : 4);
+        .slice(0, mainstreamPrompt && !wantsClassicalMusic ? 1 : 4);
 
       if (rankedPlaces.length > 0) {
         musicBrainzPlaceId = rankedPlaces[0].id;
@@ -485,6 +497,13 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     }
   }
 
+  const mbAnchorArtistKeys = new Set(
+    studioTracks
+      .slice(0, 30)
+      .map((row) => normalizeArtistKey(row.artist))
+      .filter((value) => value.length > 0)
+  );
+
   const minimumBreadthTarget = Math.min(8, Math.max(4, Math.floor(limit / 3)));
   const hasSufficientMusicBrainzCore = studioTracks.length >= 16 || countUniqueArtists(studioTracks) >= 8;
   const shouldUseDiscogsFallback =
@@ -530,6 +549,11 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
       const desiredDiscogsSeed = Math.max(limit, 120);
       const mainstreamHintLimit = mainstreamPrompt ? 3 : effectiveArtistHints.length;
       const prioritizedHints = effectiveArtistHints.slice(0, mainstreamHintLimit);
+      const hintAnchorKeys = new Set(
+        prioritizedHints
+          .map((artist) => normalizeArtistKey(artist))
+          .filter((artist) => artist.length > 0)
+      );
 
       let discogsTracks: Array<{
         artist: string;
@@ -629,7 +653,14 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
           if (!row.artist || !row.title) return false;
           if (isVariantStudioTitle(row.title)) return false;
           if (!wantsClassicalMusic && !isLikelySongRecording(row.artist, row.title)) return false;
-          return shouldKeepStudioTrackByClassicalPolicy(row.artist, row.title, wantsClassicalMusic);
+          if (!shouldKeepStudioTrackByClassicalPolicy(row.artist, row.title, wantsClassicalMusic)) return false;
+          if (mainstreamPrompt && !wantsClassicalMusic && hintAnchorKeys.size >= 3) {
+            return artistMatchesAnchors(row.artist, hintAnchorKeys);
+          }
+          if (mainstreamPrompt && !wantsClassicalMusic && mbAnchorArtistKeys.size >= 4) {
+            return artistMatchesAnchors(row.artist, mbAnchorArtistKeys);
+          }
+          return true;
         });
 
       const mergedByKey = new Map<string, StudioSeedTrack>();

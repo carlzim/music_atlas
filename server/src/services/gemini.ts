@@ -1749,7 +1749,7 @@ async function rankStudioTracksByRecognition(
   if (tracks.length <= 1) return tracks;
 
   const wantsClassicalMusic = promptWantsClassicalMusic(_prompt);
-  const mainstreamPrompt = /\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/i.test(_prompt) && !wantsClassicalMusic;
+  const mainstreamPrompt = /\bbest\b|\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\btop\b|\bgreatest\b|\bmegaklassiker\b/i.test(_prompt) && !wantsClassicalMusic;
   const preferredArtistKeys = Array.from(preferredArtists)
     .map((value) => normalizeArtistIdentity(value))
     .filter((value) => value.length > 0);
@@ -1831,7 +1831,7 @@ async function rankStudioTracksByRecognition(
 async function applyStudioMainstreamRecognitionGate(prompt: string, tracks: Track[]): Promise<Track[]> {
   if (tracks.length <= 1) return tracks;
   if (promptWantsClassicalMusic(prompt)) return tracks;
-  if (!/\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\bmegaklassiker\b/i.test(prompt)) {
+  if (!/\bbest\b|\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\btop\b|\bgreatest\b|\bmegaklassiker\b/i.test(prompt)) {
     return tracks;
   }
 
@@ -1889,6 +1889,83 @@ async function applyStudioMainstreamRecognitionGate(prompt: string, tracks: Trac
   const prioritizedKeys = new Set(prioritizedTracks.map((row) => `${normalizeArtistIdentity(row.artist)}::${normalize(row.song)}`));
   const remainder = tracks.filter((track) => !prioritizedKeys.has(`${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
   return [...prioritizedTracks, ...remainder];
+}
+
+async function rerankStudioTracksWithGemini(prompt: string, tracks: Track[]): Promise<Track[]> {
+  if (tracks.length <= 1) return tracks;
+  if (promptWantsClassicalMusic(prompt)) return tracks;
+  const mainstreamPrompt = /\bbest\b|\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\btop\b|\bgreatest\b|\bmegaklassiker\b/i.test(prompt);
+  if (!mainstreamPrompt) return tracks;
+
+  try {
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const candidateList = tracks.slice(0, 80).map((track, index) => ({
+      index: index + 1,
+      artist: track.artist,
+      song: track.song,
+    }));
+
+    const result = await callGeminiWithRetry(() => model.generateContent(
+      `You are ranking verified studio recordings for mainstream recognition.
+
+User prompt: ${prompt}
+
+Candidates (already verified):
+${JSON.stringify(candidateList)}
+
+Return ONLY a JSON array in this format:
+[{"artist":"","song":""}]
+
+Rules:
+- Re-rank for globally recognizable, canonical pop/rock/mainstream songs.
+- Avoid classical and jazz-standard style picks unless they are globally iconic crossover tracks.
+- Use only candidates from the provided list; do not invent new songs.
+- Keep as many unique artists as possible.`
+    ));
+
+    let text = result.response.text().trim();
+    if (text.startsWith('```json')) text = text.slice(7);
+    else if (text.startsWith('```')) text = text.slice(3);
+    if (text.endsWith('```')) text = text.slice(0, -3);
+
+    const parsed = JSON.parse(text.trim());
+    if (!Array.isArray(parsed)) return tracks;
+
+    const rankedKeys: string[] = parsed
+      .filter((item): item is { artist: string; song: string } => (
+        !!item
+        && typeof item === 'object'
+        && typeof item.artist === 'string'
+        && typeof item.song === 'string'
+      ))
+      .map((item) => `${normalizeArtistIdentity(item.artist)}::${normalize(item.song)}`)
+      .filter((value) => value.length > 4);
+
+    if (rankedKeys.length === 0) return tracks;
+
+    const byKey = new Map<string, Track>();
+    for (const track of tracks) {
+      const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+      if (!byKey.has(key)) byKey.set(key, track);
+    }
+
+    const reordered: Track[] = [];
+    const used = new Set<string>();
+    for (const key of rankedKeys) {
+      const track = byKey.get(key);
+      if (!track || used.has(key)) continue;
+      reordered.push(track);
+      used.add(key);
+    }
+    for (const track of tracks) {
+      const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+      if (used.has(key)) continue;
+      reordered.push(track);
+    }
+    return reordered;
+  } catch {
+    return tracks;
+  }
 }
 
 function applyStudioIdentityYearBounds(constraint: PromptConstraint, tracks: Track[]): Track[] {
@@ -3888,6 +3965,57 @@ async function generateAdditionalTrackCandidates(prompt: string, count: number):
   }
 }
 
+async function generateStudioRecallCandidates(prompt: string, studioName: string, count: number): Promise<Track[]> {
+  try {
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const wantsClassical = promptWantsClassicalMusic(prompt);
+    const styleInstruction = wantsClassical
+      ? 'Focus on the most famous classical and orchestral recordings linked to this studio.'
+      : 'Focus on the most famous non-classical recordings (rock/pop/soul/hip-hop/electronic). Avoid classical and film-score picks unless globally iconic crossover hits.';
+
+    const result = await callGeminiWithRetry(() => model.generateContent(
+      `You are building a recall list for music fact verification.
+
+User prompt: ${prompt}
+Studio constraint: ${studioName}
+
+Return ONLY a JSON array with ${count} studio-recall track candidates in this format:
+[{"artist":"","song":"","reason":""}]
+
+Rules:
+- Prioritize globally recognizable songs and artists for this studio.
+- Prefer mainstream, historically canonical picks over deep cuts.
+- ${styleInstruction}
+- Keep titles as canonical as possible (avoid session/date suffixes when not essential).
+- Do not return niche B-sides or obscure outtakes unless there are no famous alternatives.`
+    ));
+
+    let text = result.response.text().trim();
+    if (text.startsWith('```json')) text = text.slice(7);
+    else if (text.startsWith('```')) text = text.slice(3);
+    if (text.endsWith('```')) text = text.slice(0, -3);
+
+    const parsed = JSON.parse(text.trim());
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed
+      .filter((item): item is Track => {
+        return !!item
+          && typeof item === 'object'
+          && typeof item.artist === 'string'
+          && typeof item.song === 'string'
+          && typeof item.reason === 'string'
+          && item.artist.trim().length > 0
+          && item.song.trim().length > 0
+          && item.reason.trim().length > 0;
+      })
+      .slice(0, Math.max(0, count));
+  } catch (e) {
+    console.error('[Gemini] Studio recall candidate generation failed:', e);
+    return [];
+  }
+}
+
 async function repairPlaylistJsonResponse(rawResponse: string): Promise<string | null> {
   try {
     const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
@@ -4218,6 +4346,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
   let creditEvidenceTracks = getCreditEvidenceTrackCandidates(constraint, 220);
   const creditEvidenceSeedTracks = bootstrapCreditEvidenceTracks(constraint);
+  let studioGeminiRecallArtists: string[] = [];
   let evidenceFirstCreditMode = constraint?.kind === 'credit' && (truthFirstCreditMode || creditEvidenceSeedTracks.length > 0);
   let candidateTracks = evidenceFirstCreditMode
     ? dedupeTracks([...truthCreditSeedTracks, ...creditEvidenceSeedTracks])
@@ -4244,7 +4373,28 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     if (constraint.kind === 'credit') {
       console.log('[verification] skipped Gemini candidate expansion for credit prompt; using evidence/truth-first flow');
     } else if (constraint.kind === 'studio') {
-      console.log('[verification] skipped Gemini candidate expansion for studio prompt; prioritizing studio evidence backfill');
+      const studioName = (constraint.value || '').trim();
+      if (studioName) {
+        const studioRecallCandidates = await generateStudioRecallCandidates(
+          translatedPrompt,
+          studioName,
+          Math.max(24, (MIN_VERIFIED_TRACKS - verifiedTracks.length) + 20)
+        );
+        if (studioRecallCandidates.length > 0) {
+          studioGeminiRecallArtists = Array.from(
+            new Set(
+              studioRecallCandidates
+                .map((track) => canonicalizeDisplayName(track.artist || ''))
+                .filter((artist) => artist.length > 0)
+            )
+          ).slice(0, 20);
+          candidateTracks = dedupeTracks([...studioRecallCandidates, ...candidateTracks]);
+          verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
+          console.log(`[verification] studio recall candidates added=${studioRecallCandidates.length} verified_after=${verifiedTracks.length}`);
+        } else {
+          console.log('[verification] studio recall candidate expansion returned no rows');
+        }
+      }
     } else {
       for (let attempt = 0; attempt < MAX_EXTRA_ATTEMPTS; attempt += 1) {
         const needed = MIN_VERIFIED_TRACKS - verifiedTracks.length;
@@ -4411,16 +4561,25 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       if (studioBackfillEnabled) {
         const evidenceBeforeStudioBackfill = getCombinedStudioEvidenceCount(constraint);
         const forceStudioBackfillAttempt = evidenceBeforeStudioBackfill === 0;
+        const studioMainstreamHintMode = /\bbest\b|\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\btop\b|\bgreatest\b|\bmegaklassiker\b/i.test(translatedPrompt)
+          && !promptWantsClassicalMusic(translatedPrompt);
+        const hintBaseArtists = studioMainstreamHintMode
+          ? [
+              ...(constraint.studioPreferredArtists || []),
+              ...studioGeminiRecallArtists,
+            ]
+          : [
+              ...(constraint.studioPreferredArtists || []),
+              ...studioGeminiRecallArtists,
+              ...candidateTracks.map((track) => canonicalizeDisplayName(track.artist || '')),
+            ];
         const studioArtistHints = Array.from(
           new Set(
-            [
-              ...(constraint.studioPreferredArtists || []),
-              ...candidateTracks.map((track) => canonicalizeDisplayName(track.artist || '')),
-            ]
+            hintBaseArtists
               .map((artist) => canonicalizeDisplayName(artist || ''))
               .filter((artist) => artist.length > 0)
           )
-        ).slice(0, 8);
+        ).slice(0, 16);
         const studioBackfillWindow = shouldAttemptStudioAutoBackfill(
           studioName,
           constraint.studioIdentityKey,
@@ -4509,8 +4668,35 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
           reason: `Verified recording studio evidence for ${studioName}`,
         }));
 
+      const recallArtistKeys = new Set(
+        studioGeminiRecallArtists
+          .map((artist) => normalizeArtistIdentity(artist))
+          .filter((artist) => artist.length > 0)
+      );
+
+      const studioPromptNeedsKnownBias = /\bbest\b|\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\btop\b|\bgreatest\b|\bmegaklassiker\b/i.test(translatedPrompt)
+        && !promptWantsClassicalMusic(translatedPrompt);
+
+      const prioritizedStudioSeedTracks = (() => {
+        if (!studioPromptNeedsKnownBias || recallArtistKeys.size === 0) return studioSeedTracks;
+
+        const anchored = studioSeedTracks.filter((track) => {
+          const artistKey = normalizeArtistIdentity(track.artist || '');
+          if (!artistKey) return false;
+          for (const recall of recallArtistKeys) {
+            if (artistKey === recall || artistKey.includes(recall) || recall.includes(artistKey)) {
+              return true;
+            }
+          }
+          return false;
+        });
+
+        if (anchored.length < MIN_PLAYLIST_TRACKS) return studioSeedTracks;
+        return [...anchored, ...studioSeedTracks];
+      })();
+
       if (studioSeedTracks.length > 0) {
-        candidateTracks = dedupeTracks([...studioSeedTracks, ...candidateTracks]);
+        candidateTracks = dedupeTracks([...prioritizedStudioSeedTracks, ...candidateTracks]);
         verifiedTracks = filterTracksByConstraint(candidateTracks, constraint, translatedPrompt, creditEvidenceTracks);
       }
     }
@@ -4842,12 +5028,16 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   const studioVerifiedBeforeDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
   if (constraint?.kind === 'studio') {
     const preferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
+    const recallStudioArtists = new Set(studioGeminiRecallArtists.map((value) => normalize(value)).filter(Boolean));
+    const rankingStudioArtists = new Set<string>([...preferredStudioArtists, ...recallStudioArtists]);
     playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
     playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
     playlist.tracks = applyStudioClassicalPolicy(translatedPrompt, playlist.tracks);
+    playlist.tracks = await rerankStudioTracksWithGemini(translatedPrompt, playlist.tracks);
     playlist.tracks = applyStudioCuratedTrackWhitelist(constraint, playlist.tracks);
-    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, preferredStudioArtists);
+    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, rankingStudioArtists);
     playlist.tracks = await applyStudioMainstreamRecognitionGate(translatedPrompt, playlist.tracks);
+    playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
     playlist.tracks = applyStudioArtistDiversity(playlist.tracks);
     playlist.tracks = enforceStudioClassicalRatio(translatedPrompt, playlist.tracks);
   }

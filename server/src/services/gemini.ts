@@ -5700,7 +5700,16 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
             reason: `Verified recording studio evidence for ${(constraint.value || '').trim()}`,
           }));
 
-        const merged = dedupeTracks([...playlist.tracks, ...emergencySeed]);
+        const emergencyPreferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
+        const emergencyRecallStudioArtists = new Set(studioGeminiRecallArtists.map((value) => normalize(value)).filter(Boolean));
+        const emergencyRankingStudioArtists = new Set<string>([...emergencyPreferredStudioArtists, ...emergencyRecallStudioArtists]);
+
+        let merged = dedupeTracks([...playlist.tracks, ...candidateTracks, ...emergencySeed]);
+        merged = filterTracksByStudioAcceptedEvidenceOnly(merged, constraint);
+        merged = applyStudioIdentityYearBounds(constraint, merged);
+        merged = enforceStudioClassicalRatio(translatedPrompt, merged);
+        merged = await rankStudioTracksByRecognition(translatedPrompt, merged, emergencyRankingStudioArtists);
+        merged = await applyStudioMainstreamRecognitionGate(translatedPrompt, merged);
         if (merged.length >= MIN_PLAYLIST_TRACKS) {
           const selected = dedupeTracks([...playlist.tracks]);
           const selectedKeys = new Set(selected.map((track) => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));

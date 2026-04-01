@@ -203,6 +203,8 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 const GEMINI_RETRY_DELAYS_MS = [0, 1000, 3000];
 const MAX_PLAYLIST_TRACKS = 15;
 const MIN_PLAYLIST_TRACKS = 8;
+const STUDIO_CANDIDATE_POOL_MAX = 450;
+const STUDIO_DIAGNOSTICS_CAP = 120;
 const AUTO_BACKFILL_COOLDOWN_MS = Math.max(
   0,
   Number.isFinite(Number(process.env.MUSICBRAINZ_AUTO_BACKFILL_COOLDOWN_MS || '600000'))
@@ -217,9 +219,9 @@ const STUDIO_AUTO_BACKFILL_COOLDOWN_MS = Math.max(
 );
 const STUDIO_AUTO_BACKFILL_TIMEOUT_MS = Math.max(
   1000,
-  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '180000'))
-    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '180000')
-    : 180000
+  Number.isFinite(Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '300000'))
+    ? Number(process.env.STUDIO_AUTO_BACKFILL_TIMEOUT_MS || '300000')
+    : 300000
 );
 const lastAutoBackfillByCredit = new Map<string, number>();
 const lastAutoBackfillByStudio = new Map<string, number>();
@@ -1915,7 +1917,7 @@ async function rankStudioTracksByRecognition(
   });
 
   if (mainstreamPrompt) {
-    const lookupCap = Math.min(20, scored.length);
+    const lookupCap = Math.min(STUDIO_DIAGNOSTICS_CAP, scored.length);
     const lookupTimeoutMs = 1200;
 
     const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
@@ -1976,7 +1978,7 @@ async function applyStudioMainstreamRecognitionGate(prompt: string, tracks: Trac
     return tracks;
   }
 
-  const lookupCap = Math.min(24, tracks.length);
+  const lookupCap = Math.min(STUDIO_DIAGNOSTICS_CAP, tracks.length);
   const lookupTimeoutMs = 1100;
   const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number): Promise<T | null> => {
     return await new Promise((resolve) => {
@@ -2010,25 +2012,69 @@ async function applyStudioMainstreamRecognitionGate(prompt: string, tracks: Trac
     })
   );
 
-  const strong = scored.filter((row) => row.popularity >= 60 || (row.popularity >= 48 && row.recognition >= 7));
-  const medium = scored.filter((row) => row.popularity >= 45 || (row.popularity >= 36 && row.recognition >= 7));
-  const prioritize = strong.length >= MIN_PLAYLIST_TRACKS
-    ? strong
-    : medium.length >= MIN_PLAYLIST_TRACKS
-      ? medium
-      : [];
-
-  if (prioritize.length === 0) return tracks;
-
-  prioritize.sort((a, b) => {
+  const sortByRecognition = (a: { popularity: number; recognition: number; index: number }, b: { popularity: number; recognition: number; index: number }): number => {
     if (b.popularity !== a.popularity) return b.popularity - a.popularity;
     if (b.recognition !== a.recognition) return b.recognition - a.recognition;
     return a.index - b.index;
-  });
+  };
 
-  const prioritizedTracks = prioritize.map((row) => row.track);
-  const prioritizedKeys = new Set(prioritizedTracks.map((row) => `${normalizeArtistIdentity(row.artist)}::${normalize(row.song)}`));
-  const remainder = tracks.filter((track) => !prioritizedKeys.has(`${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
+  const strong = scored.filter((row) => row.popularity >= 62 || (row.popularity >= 50 && row.recognition >= 7));
+  const medium = scored.filter((row) => row.popularity >= 50 || (row.popularity >= 40 && row.recognition >= 7));
+  const fallbackRecognized = scored.filter((row) => row.popularity >= 35 || row.recognition >= 7);
+
+  strong.sort(sortByRecognition);
+  medium.sort(sortByRecognition);
+  fallbackRecognized.sort(sortByRecognition);
+
+  const prioritizedSource = strong.length >= MIN_PLAYLIST_TRACKS
+    ? strong
+    : medium.length >= MIN_PLAYLIST_TRACKS
+      ? medium
+      : fallbackRecognized.length >= MIN_PLAYLIST_TRACKS
+        ? fallbackRecognized
+        : scored.slice().sort(sortByRecognition);
+
+  const pickWithArtistCaps = (
+    rows: Array<{ track: Track; index: number; recognition: number; popularity: number }>,
+    artistCap: number,
+    limit: number,
+    usedKeys: Set<string>,
+    artistCounts: Map<string, number>
+  ): Array<{ track: Track; index: number; recognition: number; popularity: number }> => {
+    const picked: Array<{ track: Track; index: number; recognition: number; popularity: number }> = [];
+    for (const row of rows) {
+      if (picked.length >= limit) break;
+      const trackKey = `${normalizeArtistIdentity(row.track.artist)}::${normalize(row.track.song)}`;
+      if (!trackKey || usedKeys.has(trackKey)) continue;
+      const artistKey = normalizeArtistIdentity(row.track.artist);
+      if (!artistKey) continue;
+      const count = artistCounts.get(artistKey) || 0;
+      if (count >= artistCap) continue;
+      picked.push(row);
+      usedKeys.add(trackKey);
+      artistCounts.set(artistKey, count + 1);
+    }
+    return picked;
+  };
+
+  const prioritized: Array<{ track: Track; index: number; recognition: number; popularity: number }> = [];
+  const prioritizedKeys = new Set<string>();
+  const prioritizedArtistCounts = new Map<string, number>();
+  const prioritizedLimit = Math.min(lookupCap, Math.max(MAX_PLAYLIST_TRACKS * 4, MIN_PLAYLIST_TRACKS + 20));
+
+  prioritized.push(...pickWithArtistCaps(prioritizedSource, 1, prioritizedLimit, prioritizedKeys, prioritizedArtistCounts));
+  if (prioritized.length < prioritizedLimit) {
+    prioritized.push(...pickWithArtistCaps(prioritizedSource, 2, prioritizedLimit - prioritized.length, prioritizedKeys, prioritizedArtistCounts));
+  }
+  if (prioritized.length < prioritizedLimit) {
+    prioritized.push(...pickWithArtistCaps(prioritizedSource, 3, prioritizedLimit - prioritized.length, prioritizedKeys, prioritizedArtistCounts));
+  }
+
+  if (prioritized.length === 0) return tracks;
+
+  const prioritizedTracks = prioritized.map((row) => row.track);
+  const prioritizedTrackKeys = new Set(prioritizedTracks.map((row) => `${normalizeArtistIdentity(row.artist)}::${normalize(row.song)}`));
+  const remainder = tracks.filter((track) => !prioritizedTrackKeys.has(`${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
   return [...prioritizedTracks, ...remainder];
 }
 
@@ -2040,7 +2086,7 @@ async function rerankStudioTracksWithGemini(prompt: string, tracks: Track[]): Pr
 
   try {
     const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-    const candidateList = tracks.slice(0, 80).map((track, index) => ({
+    const candidateList = tracks.slice(0, STUDIO_DIAGNOSTICS_CAP).map((track, index) => ({
       index: index + 1,
       artist: track.artist,
       song: track.song,
@@ -2735,28 +2781,32 @@ async function applyStudioAlbumInferenceFallback(
   const lookupCandidates = candidateTracks.filter((track) => {
     const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
     return key.length > 4 && !verifiedKeys.has(key);
-  }).slice(0, 40);
+  }).slice(0, STUDIO_CANDIDATE_POOL_MAX);
 
-  for (const track of lookupCandidates) {
+  for (let candidateIndex = 0; candidateIndex < lookupCandidates.length; candidateIndex += 1) {
+    const track = lookupCandidates[candidateIndex];
+    if (!track) continue;
     const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
     if (!key || verifiedKeys.has(key)) continue;
 
     let albumTitle = typeof track.album_title === 'string' ? track.album_title.trim() : '';
     let popularity = 0;
     let recognition = 0;
-    try {
-      const info = await runWithTimeout(
-        () => searchTrackWithDiagnostics(track.artist, track.song, prompt),
-        1200,
-        'studio_album_lookup_timeout'
-      );
-      albumTitle = albumTitle || (typeof info.matchedAlbumTitle === 'string' ? info.matchedAlbumTitle.trim() : '');
-      if (albumTitle && !track.album_title) track.album_title = albumTitle;
-      if (!track.spotify_url && info.spotify_url) track.spotify_url = info.spotify_url;
-      popularity = typeof info.popularity === 'number' && Number.isFinite(info.popularity) ? info.popularity : 0;
-      recognition = typeof info.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
-    } catch {
-      // Keep fallback behavior; unresolved metadata simply won't pass strict gates below.
+    if (candidateIndex < STUDIO_DIAGNOSTICS_CAP) {
+      try {
+        const info = await runWithTimeout(
+          () => searchTrackWithDiagnostics(track.artist, track.song, prompt),
+          1200,
+          'studio_album_lookup_timeout'
+        );
+        albumTitle = albumTitle || (typeof info.matchedAlbumTitle === 'string' ? info.matchedAlbumTitle.trim() : '');
+        if (albumTitle && !track.album_title) track.album_title = albumTitle;
+        if (!track.spotify_url && info.spotify_url) track.spotify_url = info.spotify_url;
+        popularity = typeof info.popularity === 'number' && Number.isFinite(info.popularity) ? info.popularity : 0;
+        recognition = typeof info.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
+      } catch {
+        // Keep fallback behavior; unresolved metadata simply won't pass strict gates below.
+      }
     }
 
     if (popularity < 45 && !(popularity >= 36 && recognition >= 7)) continue;
@@ -4835,7 +4885,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
                 artistHints: studioArtistHints,
                 activeStartYear: constraint.studioActiveStartYear,
                 activeEndYear: constraint.studioActiveEndYear,
-                limit: 50,
+                limit: STUDIO_CANDIDATE_POOL_MAX,
               }),
               STUDIO_AUTO_BACKFILL_TIMEOUT_MS,
               'studio_backfill_timeout'
@@ -4890,7 +4940,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         };
       }
 
-      const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, 180, true))
+      const studioSeedTracks = acceptedStudios.flatMap((name) => getTracksByRecordingStudioEvidence(name, STUDIO_CANDIDATE_POOL_MAX, true))
         .map((row) => ({
           artist: row.artist,
           song: row.title,

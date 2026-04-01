@@ -27,10 +27,6 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
       'EMI studios i Skarmarbrink, Stockholm',
       'EMI studios in Skarmarbrink, Stockholm',
       'EMI studios in Stockholm',
-      'Metronome Studio, Stockholm',
-      'Metronome Studios, Stockholm',
-      'Metronome Studio',
-      'Metronome Studios',
     ],
     successorNames: [
       'Cosmos Studios',

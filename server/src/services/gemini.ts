@@ -5015,10 +5015,10 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
         ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
         : [studioName];
-      const studioBackfillEnabled = process.env.ENABLE_STUDIO_DISCOGS_BACKFILL !== 'false';
-      if (studioBackfillEnabled) {
-        const evidenceBeforeStudioBackfill = getCombinedStudioEvidenceCount(constraint);
-        const forceStudioBackfillAttempt = evidenceBeforeStudioBackfill === 0;
+        const studioBackfillEnabled = process.env.ENABLE_STUDIO_DISCOGS_BACKFILL !== 'false';
+        if (studioBackfillEnabled) {
+          const evidenceBeforeStudioBackfill = getCombinedStudioEvidenceCount(constraint);
+          const forceStudioBackfillAttempt = evidenceBeforeStudioBackfill < MIN_PLAYLIST_TRACKS;
         const studioMainstreamHintMode = /\bbest\b|\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\btop\b|\bgreatest\b|\bmegaklassiker\b/i.test(translatedPrompt)
           && !promptWantsClassicalMusic(translatedPrompt);
         const hintBaseArtists = studioMainstreamHintMode

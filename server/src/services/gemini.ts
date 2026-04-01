@@ -5552,10 +5552,15 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         }));
 
       if (sparseRescueSeedTracks.length > 0) {
+        const rescuePreferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
+        const rescueRecallStudioArtists = new Set(studioGeminiRecallArtists.map((value) => normalize(value)).filter(Boolean));
+        const rescueRankingStudioArtists = new Set<string>([...rescuePreferredStudioArtists, ...rescueRecallStudioArtists]);
         const mergedSparseCandidates = dedupeTracks([...playlist.tracks, ...sparseRescueSeedTracks]);
         let sparseRescueTracks = filterTracksByConstraint(mergedSparseCandidates, constraint, translatedPrompt, creditEvidenceTracks);
         sparseRescueTracks = applyStudioIdentityYearBounds(constraint, sparseRescueTracks);
         sparseRescueTracks = enforceStudioClassicalRatio(translatedPrompt, sparseRescueTracks);
+        sparseRescueTracks = await rankStudioTracksByRecognition(translatedPrompt, sparseRescueTracks, rescueRankingStudioArtists);
+        sparseRescueTracks = await applyStudioMainstreamRecognitionGate(translatedPrompt, sparseRescueTracks);
         const sparseComposed = composeStudioFinalSelection(sparseRescueTracks, MAX_PLAYLIST_TRACKS);
         if (sparseComposed.tracks.length > playlist.tracks.length) {
           playlist.tracks = sparseComposed.tracks;

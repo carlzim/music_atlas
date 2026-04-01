@@ -2776,6 +2776,19 @@ function filterTracksByConstraint(
   });
 }
 
+function filterTracksByStudioAcceptedEvidenceOnly(tracks: Track[], constraint: PromptConstraint): Track[] {
+  if (constraint.kind !== 'studio') return tracks;
+
+  const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+    ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+    : [(constraint.value || '').trim()].filter(Boolean);
+  if (acceptedStudios.length === 0) return [];
+
+  return tracks.filter((track) => {
+    return acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
+  });
+}
+
 async function applyStudioAlbumInferenceFallback(
   prompt: string,
   candidateTracks: Track[],
@@ -5571,6 +5584,13 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
         const rescueRankingStudioArtists = new Set<string>([...rescuePreferredStudioArtists, ...rescueRecallStudioArtists]);
         const mergedSparseCandidates = dedupeTracks([...playlist.tracks, ...sparseRescueSeedTracks]);
         let sparseRescueTracks = filterTracksByConstraint(mergedSparseCandidates, constraint, translatedPrompt, creditEvidenceTracks);
+        if (sparseRescueTracks.length < MIN_PLAYLIST_TRACKS) {
+          const acceptedOnlyRescue = filterTracksByStudioAcceptedEvidenceOnly(mergedSparseCandidates, constraint);
+          if (acceptedOnlyRescue.length >= MIN_PLAYLIST_TRACKS) {
+            sparseRescueTracks = acceptedOnlyRescue;
+            console.log(`[verification] sparse studio accepted-only fallback activated tracks=${acceptedOnlyRescue.length} minimum=${MIN_PLAYLIST_TRACKS}`);
+          }
+        }
         sparseRescueTracks = applyStudioIdentityYearBounds(constraint, sparseRescueTracks);
         sparseRescueTracks = enforceStudioClassicalRatio(translatedPrompt, sparseRescueTracks);
         sparseRescueTracks = await rankStudioTracksByRecognition(translatedPrompt, sparseRescueTracks, rescueRankingStudioArtists);

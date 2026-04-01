@@ -269,10 +269,17 @@ function humanizeStudioBackfillSkipReason(reason: string): string {
 }
 
 function getPlaylistRequestTimeoutMs(): number {
-  const raw = Number((import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_PLAYLIST_REQUEST_TIMEOUT_MS || '90000');
-  if (!Number.isFinite(raw) || raw < 30000) return 90000;
+  const raw = Number((import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_PLAYLIST_REQUEST_TIMEOUT_MS || '300000');
+  if (!Number.isFinite(raw) || raw < 30000) return 300000;
   return Math.floor(raw);
 }
+
+const GENERATION_PROGRESS_STEPS = [
+  'Gathering evidence',
+  'Verifying tracks',
+  'Ranking top candidates',
+  'Finalizing playlist',
+] as const;
 
 function detectCreditRoleFromPrompt(prompt: string): PromptCreditRole | null {
   const value = prompt.trim();
@@ -654,6 +661,7 @@ function HomePage() {
   const [topTags, setTopTags] = useState<TopTagItem[]>([]);
   const [qualityStatus, setQualityStatus] = useState<QualityStatusSummary | null>(null);
   const [qualityLoading, setQualityLoading] = useState(false);
+  const [generationProgressStep, setGenerationProgressStep] = useState(0);
 
   const loadRecentPlaylists = async () => {
     try {
@@ -701,6 +709,22 @@ function HomePage() {
     loadTopTags();
     loadQualityStatus();
   }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      setGenerationProgressStep(0);
+      return;
+    }
+
+    setGenerationProgressStep(1);
+    const intervalId = window.setInterval(() => {
+      setGenerationProgressStep((current) => Math.min(GENERATION_PROGRESS_STEPS.length, current + 1));
+    }, 1800);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [loading]);
 
   const generateFromPrompt = async (promptText: string) => {
     setLoading(true);
@@ -918,6 +942,19 @@ function HomePage() {
         <button type="submit" disabled={loading || !prompt.trim()}>
           {loading ? 'Generating playlist...' : 'Generate playlist'}
         </button>
+        {loading && generationProgressStep > 0 && (
+          <div className="generation-progress" role="status" aria-live="polite">
+            <p className="generation-progress-label">
+              Step {generationProgressStep}/{GENERATION_PROGRESS_STEPS.length}: {GENERATION_PROGRESS_STEPS[generationProgressStep - 1]}
+            </p>
+            <div className="generation-progress-track">
+              <div
+                className="generation-progress-fill"
+                style={{ width: `${Math.round((generationProgressStep / GENERATION_PROGRESS_STEPS.length) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
         {isLikelyCreditPrompt && (
           <button type="button" onClick={handleBackfillEvidence} disabled={evidenceLoading || loading || !prompt.trim()}>
             {evidenceLoading ? 'Backfilling evidence...' : `Backfill credit evidence (${backfillSourceLabel})`}

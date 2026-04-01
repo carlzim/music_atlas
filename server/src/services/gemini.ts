@@ -5645,6 +5645,46 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     throw new Error(`Only ${playlist.tracks.length} strongly verified tracks were found for this credit constraint. Try a broader prompt, or generate a few related playlists first to build evidence.`);
   }
 
+  if (constraint?.kind === 'studio' && playlist.tracks.length < MIN_PLAYLIST_TRACKS) {
+    const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+      ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+      : [(constraint.value || '').trim()].filter(Boolean);
+
+    if (acceptedStudios.length > 0) {
+      const emergencySeedTracks = acceptedStudios
+        .flatMap((studio) => getTracksByRecordingStudioEvidence(studio, 500, true))
+        .map((row) => ({
+          artist: row.artist,
+          song: row.title,
+          reason: `Verified recording studio evidence for ${(constraint.value || '').trim()}`,
+        }));
+
+      const emergencyPool = dedupeTracks([...playlist.tracks, ...candidateTracks, ...emergencySeedTracks]);
+      let emergencyTracks = filterTracksByStudioAcceptedEvidenceOnly(emergencyPool, constraint);
+      emergencyTracks = applyStudioIdentityYearBounds(constraint, emergencyTracks);
+      emergencyTracks = enforceStudioClassicalRatio(translatedPrompt, emergencyTracks);
+
+      const emergencyPreferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
+      const emergencyRecallStudioArtists = new Set(studioGeminiRecallArtists.map((value) => normalize(value)).filter(Boolean));
+      const emergencyRankingStudioArtists = new Set<string>([...emergencyPreferredStudioArtists, ...emergencyRecallStudioArtists]);
+      emergencyTracks = await rankStudioTracksByRecognition(translatedPrompt, emergencyTracks, emergencyRankingStudioArtists);
+      emergencyTracks = await applyStudioMainstreamRecognitionGate(translatedPrompt, emergencyTracks);
+
+      const emergencyComposed = composeStudioFinalSelection(emergencyTracks, MAX_PLAYLIST_TRACKS);
+      if (emergencyComposed.tracks.length > playlist.tracks.length) {
+        playlist.tracks = emergencyComposed.tracks;
+        if (truth.studio_constraint) {
+          truth.studio_constraint.target_tracks = emergencyComposed.diagnostics.targetTracks;
+          truth.studio_constraint.computed_unique_artist_target = emergencyComposed.diagnostics.computedUniqueArtistTarget;
+          truth.studio_constraint.final_unique_artist_count = emergencyComposed.diagnostics.finalUniqueArtistCount;
+          truth.studio_constraint.used_artist_cap_3_fallback = emergencyComposed.diagnostics.usedArtistCap3Fallback;
+          truth.studio_constraint.fallback_reason = emergencyComposed.diagnostics.fallbackReason;
+        }
+        console.log(`[verification] emergency studio floor rescue activated before strict floor check tracks=${playlist.tracks.length}`);
+      }
+    }
+  }
+
   if (playlist.tracks.length < MIN_PLAYLIST_TRACKS) {
     if (constraint?.kind === 'studio') {
       throw new Error(`Strict studio precision mode found only ${playlist.tracks.length} recorded-at tracks for ${constraint.value || 'this studio'}. At least ${MIN_PLAYLIST_TRACKS} are required.`);

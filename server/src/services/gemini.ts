@@ -2621,13 +2621,17 @@ function filterTracksByConstraint(
       ? Array.from(new Set(constraint.studioExcludedSuccessorNames.map((value) => value.trim()).filter(Boolean)))
       : [];
 
-    return tracks.filter((track) => {
+    const acceptedMatches = tracks.filter((track) => {
       const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
       if (!acceptedMatch) {
         console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="no recording-level studio evidence for requested studio era"`);
         return false;
       }
 
+      return true;
+    });
+
+    const successorFiltered = acceptedMatches.filter((track) => {
       const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
       if (successorMatch) {
         console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="matched excluded successor studio identity"`);
@@ -2636,6 +2640,17 @@ function filterTracksByConstraint(
 
       return true;
     });
+
+    if (successorFiltered.length >= MIN_PLAYLIST_TRACKS) {
+      return successorFiltered;
+    }
+
+    if (acceptedMatches.length >= MIN_PLAYLIST_TRACKS && successorFiltered.length < MIN_PLAYLIST_TRACKS) {
+      console.log(`[verification] successor exclusion fallback activated accepted=${acceptedMatches.length} filtered=${successorFiltered.length} minimum=${MIN_PLAYLIST_TRACKS}`);
+      return acceptedMatches;
+    }
+
+    return successorFiltered;
   }
 
   if (constraint.kind === 'venue') {

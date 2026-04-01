@@ -3821,6 +3821,11 @@ function composeStudioFinalSelection(
   const artistCounts = new Map<string, number>();
 
   const trackKey = (track: Track): string => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+  const hasSelectedArtist = (track: Track): boolean => {
+    const artistKey = normalizeArtistIdentity(track.artist);
+    if (!artistKey) return false;
+    return (artistCounts.get(artistKey) || 0) > 0;
+  };
   const addTrackIfAllowed = (track: Track, artistCap: number, requireNewArtist = false): boolean => {
     if (selected.length >= desiredCount) return false;
     const key = trackKey(track);
@@ -3836,6 +3841,26 @@ function composeStudioFinalSelection(
     selectedTrackKeys.add(key);
     artistCounts.set(artistKey, existingCount + 1);
     return true;
+  };
+  const addPass = (
+    pool: Track[],
+    artistCap: number,
+    requireNewArtist = false,
+    preferAlreadySelectedArtists = false
+  ): void => {
+    if (preferAlreadySelectedArtists) {
+      for (const track of pool) {
+        if (selected.length >= desiredCount) break;
+        if (!hasSelectedArtist(track)) continue;
+        addTrackIfAllowed(track, artistCap, requireNewArtist);
+      }
+    }
+
+    for (const track of pool) {
+      if (selected.length >= desiredCount) break;
+      if (preferAlreadySelectedArtists && hasSelectedArtist(track)) continue;
+      addTrackIfAllowed(track, artistCap, requireNewArtist);
+    }
   };
 
   // Pass A: 1 track per artist until unique target is met or shortlist exhausted.
@@ -3854,16 +3879,11 @@ function composeStudioFinalSelection(
   }
 
   // Pass B: fill up to target size with artist cap 2.
-  for (const track of primaryPool) {
-    if (selected.length >= desiredCount) break;
-    addTrackIfAllowed(track, 2, false);
-  }
+  // In sparse situations, prefer strong artists already selected before pulling marginal new artists.
+  addPass(primaryPool, 2, false, true);
 
   if (selected.length < desiredCount) {
-    for (const track of tracks) {
-      if (selected.length >= desiredCount) break;
-      addTrackIfAllowed(track, 2, false);
-    }
+    addPass(tracks, 2, false, true);
   }
 
   const minimumSizeTarget = Math.min(MIN_PLAYLIST_TRACKS, desiredCount);
@@ -3873,17 +3893,11 @@ function composeStudioFinalSelection(
 
   // Pass C (fallback only): open cap to 3 if unique target or minimum size would otherwise miss.
   if (shouldUseArtistCap3Fallback) {
-    for (const track of primaryPool) {
-      if (selected.length >= desiredCount) break;
-      addTrackIfAllowed(track, 3, false);
-    }
+    addPass(primaryPool, 3, false, true);
   }
 
   if (shouldUseArtistCap3Fallback && selected.length < desiredCount) {
-    for (const track of tracks) {
-      if (selected.length >= desiredCount) break;
-      addTrackIfAllowed(track, 3, false);
-    }
+    addPass(tracks, 3, false, true);
   }
 
   if (selected.length === 0) {

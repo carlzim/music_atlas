@@ -107,6 +107,11 @@ interface TruthDetails {
     verified_tracks_before_decade_filter: number;
     verified_tracks_after_decade_filter: number;
     decade_filtered_out_count: number;
+    target_tracks?: number;
+    computed_unique_artist_target?: number;
+    final_unique_artist_count?: number;
+    used_artist_cap_3_fallback?: boolean;
+    fallback_reason?: 'none' | 'unique_target_gap' | 'size_floor_gap';
   };
   curation?: {
     mode: PlaylistCurationMode;
@@ -3754,6 +3759,102 @@ function applyStudioArtistDiversity(tracks: Track[]): Track[] {
   return chosen.length > 0 ? chosen : tracks;
 }
 
+type StudioFinalCompositionDiagnostics = {
+  targetTracks: number;
+  computedUniqueArtistTarget: number;
+  finalUniqueArtistCount: number;
+  usedArtistCap3Fallback: boolean;
+  fallbackReason: 'none' | 'unique_target_gap' | 'size_floor_gap';
+};
+
+function composeStudioFinalSelection(
+  tracks: Track[],
+  targetTracks = MAX_PLAYLIST_TRACKS
+): { tracks: Track[]; diagnostics: StudioFinalCompositionDiagnostics } {
+  if (tracks.length <= 1) {
+    const target = Math.min(targetTracks, tracks.length);
+    const uniqueArtists = countUniqueTrackArtists(tracks.slice(0, target));
+    return {
+      tracks: tracks.slice(0, target),
+      diagnostics: {
+        targetTracks: target,
+        computedUniqueArtistTarget: Math.max(8, Math.ceil(target * 0.6)),
+        finalUniqueArtistCount: uniqueArtists,
+        usedArtistCap3Fallback: false,
+        fallbackReason: 'none',
+      },
+    };
+  }
+
+  const desiredCount = Math.min(targetTracks, tracks.length);
+  const computedUniqueArtistTarget = Math.max(8, Math.ceil(desiredCount * 0.6));
+  const selected: Track[] = [];
+  const selectedTrackKeys = new Set<string>();
+  const artistCounts = new Map<string, number>();
+
+  const trackKey = (track: Track): string => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+  const addTrackIfAllowed = (track: Track, artistCap: number, requireNewArtist = false): boolean => {
+    if (selected.length >= desiredCount) return false;
+    const key = trackKey(track);
+    if (!key || selectedTrackKeys.has(key)) return false;
+
+    const artistKey = normalizeArtistIdentity(track.artist);
+    if (!artistKey) return false;
+    const existingCount = artistCounts.get(artistKey) || 0;
+    if (existingCount >= artistCap) return false;
+    if (requireNewArtist && existingCount > 0) return false;
+
+    selected.push(track);
+    selectedTrackKeys.add(key);
+    artistCounts.set(artistKey, existingCount + 1);
+    return true;
+  };
+
+  // Pass A: 1 track per artist until unique target is met or shortlist exhausted.
+  for (const track of tracks) {
+    if (selected.length >= desiredCount) break;
+    if (artistCounts.size >= computedUniqueArtistTarget) break;
+    addTrackIfAllowed(track, 1, true);
+  }
+
+  // Pass B: fill up to target size with artist cap 2.
+  for (const track of tracks) {
+    if (selected.length >= desiredCount) break;
+    addTrackIfAllowed(track, 2, false);
+  }
+
+  const minimumSizeTarget = Math.min(MIN_PLAYLIST_TRACKS, desiredCount);
+  const hasUniqueTargetGap = artistCounts.size < computedUniqueArtistTarget;
+  const hasSizeFloorGap = selected.length < minimumSizeTarget;
+  const shouldUseArtistCap3Fallback = hasUniqueTargetGap || hasSizeFloorGap;
+
+  // Pass C (fallback only): open cap to 3 if unique target or minimum size would otherwise miss.
+  if (shouldUseArtistCap3Fallback) {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      addTrackIfAllowed(track, 3, false);
+    }
+  }
+
+  const finalTracks = selected.length > 0 ? selected.slice(0, desiredCount) : tracks.slice(0, desiredCount);
+  const fallbackReason: 'none' | 'unique_target_gap' | 'size_floor_gap' = shouldUseArtistCap3Fallback
+    ? hasUniqueTargetGap
+      ? 'unique_target_gap'
+      : 'size_floor_gap'
+    : 'none';
+
+  return {
+    tracks: finalTracks,
+    diagnostics: {
+      targetTracks: desiredCount,
+      computedUniqueArtistTarget,
+      finalUniqueArtistCount: countUniqueTrackArtists(finalTracks),
+      usedArtistCap3Fallback: shouldUseArtistCap3Fallback,
+      fallbackReason,
+    },
+  };
+}
+
 function applyStudioClassicalPolicy(prompt: string, tracks: Track[]): Track[] {
   if (tracks.length <= 1) return tracks;
   if (promptWantsClassicalMusic(prompt)) return tracks;
@@ -5309,6 +5410,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     playlist.tracks = applyGeneralArtistDiversity(playlist.tracks);
   }
   const studioVerifiedBeforeDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
+  let studioCompositionDiagnostics: StudioFinalCompositionDiagnostics | null = null;
   if (constraint?.kind === 'studio') {
     const preferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
     const recallStudioArtists = new Set(studioGeminiRecallArtists.map((value) => normalize(value)).filter(Boolean));
@@ -5323,6 +5425,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
     playlist.tracks = applyStudioArtistDiversity(playlist.tracks);
     playlist.tracks = enforceStudioClassicalRatio(translatedPrompt, playlist.tracks);
+    const composedStudioSelection = composeStudioFinalSelection(playlist.tracks, MAX_PLAYLIST_TRACKS);
+    playlist.tracks = composedStudioSelection.tracks;
+    studioCompositionDiagnostics = composedStudioSelection.diagnostics;
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
 
@@ -5349,6 +5454,11 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       verified_tracks_before_decade_filter: beforeCount,
       verified_tracks_after_decade_filter: afterCount,
       decade_filtered_out_count: Math.max(0, beforeCount - afterCount),
+      target_tracks: studioCompositionDiagnostics?.targetTracks,
+      computed_unique_artist_target: studioCompositionDiagnostics?.computedUniqueArtistTarget,
+      final_unique_artist_count: studioCompositionDiagnostics?.finalUniqueArtistCount,
+      used_artist_cap_3_fallback: studioCompositionDiagnostics?.usedArtistCap3Fallback,
+      fallback_reason: studioCompositionDiagnostics?.fallbackReason,
     };
   }
 

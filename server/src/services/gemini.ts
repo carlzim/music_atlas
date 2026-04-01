@@ -5522,6 +5522,40 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     playlist.tracks = refineGeneralTrackReasons(playlist.tracks);
   }
 
+  if (constraint?.kind === 'studio' && playlist.tracks.length < MIN_PLAYLIST_TRACKS) {
+    const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+      ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+      : [(constraint.value || '').trim()].filter(Boolean);
+
+    if (acceptedStudios.length > 0) {
+      const sparseRescueSeedTracks = acceptedStudios
+        .flatMap((studio) => getTracksByRecordingStudioEvidence(studio, 500, true))
+        .map((row) => ({
+          artist: row.artist,
+          song: row.title,
+          reason: `Verified recording studio evidence for ${(constraint.value || '').trim()}`,
+        }));
+
+      if (sparseRescueSeedTracks.length > 0) {
+        const mergedSparseCandidates = dedupeTracks([...playlist.tracks, ...sparseRescueSeedTracks]);
+        let sparseRescueTracks = filterTracksByConstraint(mergedSparseCandidates, constraint, translatedPrompt, creditEvidenceTracks);
+        sparseRescueTracks = applyStudioIdentityYearBounds(constraint, sparseRescueTracks);
+        sparseRescueTracks = enforceStudioClassicalRatio(translatedPrompt, sparseRescueTracks);
+        const sparseComposed = composeStudioFinalSelection(sparseRescueTracks, MAX_PLAYLIST_TRACKS);
+        if (sparseComposed.tracks.length > playlist.tracks.length) {
+          playlist.tracks = sparseComposed.tracks;
+          if (truth.studio_constraint) {
+            truth.studio_constraint.target_tracks = sparseComposed.diagnostics.targetTracks;
+            truth.studio_constraint.computed_unique_artist_target = sparseComposed.diagnostics.computedUniqueArtistTarget;
+            truth.studio_constraint.final_unique_artist_count = sparseComposed.diagnostics.finalUniqueArtistCount;
+            truth.studio_constraint.used_artist_cap_3_fallback = sparseComposed.diagnostics.usedArtistCap3Fallback;
+            truth.studio_constraint.fallback_reason = sparseComposed.diagnostics.fallbackReason;
+          }
+        }
+      }
+    }
+  }
+
   if (playlist.tracks.length === 0) {
     if (constraint?.kind === 'credit') {
       const creditName = (constraint.value || '').trim();

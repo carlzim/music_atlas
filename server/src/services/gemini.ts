@@ -5687,9 +5687,68 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
   if (playlist.tracks.length < MIN_PLAYLIST_TRACKS) {
     if (constraint?.kind === 'studio') {
+      const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+        ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+        : [(constraint.value || '').trim()].filter(Boolean);
+
+      if (acceptedStudios.length > 0) {
+        const emergencySeed = acceptedStudios
+          .flatMap((studio) => getTracksByRecordingStudioEvidence(studio, 500, true))
+          .map((row) => ({
+            artist: row.artist,
+            song: row.title,
+            reason: `Verified recording studio evidence for ${(constraint.value || '').trim()}`,
+          }));
+
+        const merged = dedupeTracks([...playlist.tracks, ...emergencySeed]);
+        if (merged.length >= MIN_PLAYLIST_TRACKS) {
+          const selected = dedupeTracks([...playlist.tracks]);
+          const selectedKeys = new Set(selected.map((track) => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
+          const selectedArtists = new Set(selected.map((track) => normalizeArtistIdentity(track.artist)).filter((value) => value.length > 0));
+
+          const addCandidate = (track: Track): void => {
+            if (selected.length >= MIN_PLAYLIST_TRACKS) return;
+            const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+            if (!key || selectedKeys.has(key)) return;
+            selected.push(track);
+            selectedKeys.add(key);
+            const artistKey = normalizeArtistIdentity(track.artist);
+            if (artistKey) selectedArtists.add(artistKey);
+          };
+
+          for (const track of merged) {
+            if (selected.length >= MIN_PLAYLIST_TRACKS) break;
+            const artistKey = normalizeArtistIdentity(track.artist);
+            if (!artistKey || !selectedArtists.has(artistKey)) continue;
+            addCandidate(track);
+          }
+
+          for (const track of merged) {
+            if (selected.length >= MIN_PLAYLIST_TRACKS) break;
+            addCandidate(track);
+          }
+
+          if (selected.length >= MIN_PLAYLIST_TRACKS) {
+            playlist.tracks = selected;
+            if (truth.studio_constraint) {
+              truth.studio_constraint.final_unique_artist_count = countUniqueTrackArtists(playlist.tracks);
+              truth.studio_constraint.used_artist_cap_3_fallback = true;
+              truth.studio_constraint.fallback_reason = 'size_floor_gap';
+            }
+            console.log(`[verification] final studio floor fill activated tracks=${playlist.tracks.length}`);
+          }
+        }
+      }
+
+      if (playlist.tracks.length >= MIN_PLAYLIST_TRACKS) {
+        // rescued above
+      } else {
       throw new Error(`Strict studio precision mode found only ${playlist.tracks.length} recorded-at tracks for ${constraint.value || 'this studio'}. At least ${MIN_PLAYLIST_TRACKS} are required.`);
+      }
     }
-    throw new Error(`Only ${playlist.tracks.length} tracks were generated. At least ${MIN_PLAYLIST_TRACKS} are required.`);
+    else {
+      throw new Error(`Only ${playlist.tracks.length} tracks were generated. At least ${MIN_PLAYLIST_TRACKS} are required.`);
+    }
   }
 
   // Store with translated prompt

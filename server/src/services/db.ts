@@ -75,6 +75,21 @@ db.exec(`
 `);
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS recording_studio_album_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist_name TEXT NOT NULL,
+    artist_name_canonical TEXT,
+    album_title TEXT NOT NULL,
+    album_title_canonical TEXT,
+    studio_name TEXT NOT NULL,
+    studio_name_canonical TEXT,
+    source_playlist_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_playlist_id) REFERENCES playlists(id)
+  )
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS recording_credit_evidence (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recording_id INTEGER NOT NULL,
@@ -294,6 +309,7 @@ db.exec(`
 `);
 
 db.exec('CREATE INDEX IF NOT EXISTS idx_recording_studio_evidence_canonical ON recording_studio_evidence(studio_name_canonical)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_recording_studio_album_evidence_lookup ON recording_studio_album_evidence(artist_name_canonical, album_title_canonical, studio_name_canonical)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_recording_credit_evidence_canonical ON recording_credit_evidence(credit_name_canonical, credit_role)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_artist_membership_person_canonical ON artist_membership_evidence(person_name_canonical)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_artist_membership_band_canonical ON artist_membership_evidence(band_name_canonical)');
@@ -3473,6 +3489,56 @@ export function hasRecordingStudioEvidence(
       ${trustedJoinClause}
       WHERE r.canonical_key = ?
         AND COALESCE(rse.studio_name_canonical, lower(trim(rse.studio_name))) = ?
+        ${trustedWhereClause}
+      LIMIT 1
+    `).get(...params) as { matched: number } | undefined;
+
+    return Boolean(row && row.matched === 1);
+  } catch {
+    return false;
+  }
+}
+
+function buildAlbumCanonicalKey(value: string): string {
+  return canonicalizeDisplayName(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function hasRecordingStudioAlbumEvidence(
+  artist: string,
+  albumTitle: string,
+  studioName: string,
+  trustedOnly = false
+): boolean {
+  const artistCanonical = buildArtistCanonicalKey(artist);
+  const albumCanonical = buildAlbumCanonicalKey(albumTitle);
+  const studioCanonical = buildStudioCanonicalKey(studioName);
+  if (!artistCanonical || !albumCanonical || !studioCanonical) return false;
+
+  try {
+    const trustedJoinClause = trustedOnly
+      ? 'INNER JOIN playlists p ON p.id = rsae.source_playlist_id'
+      : '';
+    const trustedWhereClause = trustedOnly
+      ? 'AND (p.prompt LIKE ? OR p.prompt LIKE ?)'
+      : '';
+
+    const params: Array<string> = [artistCanonical, albumCanonical, studioCanonical];
+    if (trustedOnly) {
+      params.push('[system] studio evidence backfill from discogs ::%');
+      params.push('[system] studio evidence backfill from musicbrainz ::%');
+    }
+
+    const row = db.prepare(`
+      SELECT 1 AS matched
+      FROM recording_studio_album_evidence rsae
+      ${trustedJoinClause}
+      WHERE COALESCE(rsae.artist_name_canonical, lower(trim(rsae.artist_name))) = ?
+        AND COALESCE(rsae.album_title_canonical, lower(trim(rsae.album_title))) = ?
+        AND COALESCE(rsae.studio_name_canonical, lower(trim(rsae.studio_name))) = ?
         ${trustedWhereClause}
       LIMIT 1
     `).get(...params) as { matched: number } | undefined;

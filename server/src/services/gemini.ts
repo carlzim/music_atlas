@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { canonicalizeEquipmentName, getAtlasEntityCatalog, getAssociatedArtistsByNode, getBandMembers, getCreditAtlas, getGraphNeighbors, getKnownTags, getPlaylistByCacheKey, getTracksByRecordingCreditEvidence, getTracksByRecordingStudioEvidence, hasRecordingCreditEvidence, hasRecordingStudioEvidence, isGenericEquipmentName, normalizePromptForCache, saveArtistMembershipEvidence, savePlaylist } from './db.js';
+import { canonicalizeEquipmentName, getAtlasEntityCatalog, getAssociatedArtistsByNode, getBandMembers, getCreditAtlas, getGraphNeighbors, getKnownTags, getPlaylistByCacheKey, getTracksByRecordingCreditEvidence, getTracksByRecordingStudioEvidence, hasRecordingCreditEvidence, hasRecordingStudioAlbumEvidence, hasRecordingStudioEvidence, isGenericEquipmentName, normalizePromptForCache, saveArtistMembershipEvidence, savePlaylist } from './db.js';
 import { backfillCreditFromMusicBrainz, SUPPORTED_MUSICBRAINZ_CREDIT_ROLES } from './evidence-backfill.js';
 import { backfillStudioFromDiscogs } from './evidence-backfill-studio.js';
 import { buildArtistCanonicalKey, buildCreditCanonicalKey, buildPersonCanonicalKey, buildStudioCanonicalKey, canonicalizeDisplayName } from './normalize.js';
@@ -1448,6 +1448,12 @@ function promptWantsClassicalMusic(prompt: string): boolean {
   return /\bclassical\b|\borchestral\b|\bsymphon(?:y|ic)\b|\bconcerto\b|\bsonata\b|\bchamber\b|\bbaroque\b|\bopera\b|\bfilm score\b|\bsoundtrack\b/.test(value);
 }
 
+function isMainstreamStudioPrompt(prompt: string): boolean {
+  const value = normalize(prompt);
+  if (!value) return false;
+  return /\bbest\b|\bbest known\b|\bwell known\b|\biconic\b|\bclassic\b|\bessential\b|\bhits?\b|\bpopular\b|\bfamous\b|\btop\b|\bgreatest\b|\bmegaklassiker\b/.test(value);
+}
+
 function isLikelyClassicalOrScoreTrack(artistName: string, songTitle: string): boolean {
   const artist = normalizeArtistIdentity(artistName);
   const title = normalize(songTitle);
@@ -2567,6 +2573,84 @@ function filterTracksByConstraint(
     console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="unsupported constraint"`);
     return false;
   });
+}
+
+async function applyStudioAlbumInferenceFallback(
+  prompt: string,
+  candidateTracks: Track[],
+  verifiedTracks: Track[],
+  constraint: PromptConstraint | null
+): Promise<Track[]> {
+  if (!constraint || constraint.kind !== 'studio') return verifiedTracks;
+  if (promptWantsClassicalMusic(prompt)) return verifiedTracks;
+  if (!isMainstreamStudioPrompt(prompt)) return verifiedTracks;
+
+  const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+    ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+    : [(constraint.value || '').trim()].filter(Boolean);
+  const excludedSuccessors = Array.isArray(constraint.studioExcludedSuccessorNames)
+    ? Array.from(new Set(constraint.studioExcludedSuccessorNames.map((value) => value.trim()).filter(Boolean)))
+    : [];
+  if (acceptedStudios.length === 0) return verifiedTracks;
+
+  const verifiedKeys = new Set(verifiedTracks.map((track) => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
+  const verifiedArtistKeys = new Set(verifiedTracks.map((track) => normalizeArtistIdentity(track.artist)).filter((key) => key.length > 0));
+  const inferredPerArtist = new Map<string, number>();
+  const additions: Track[] = [];
+  const lookupCandidates = candidateTracks.filter((track) => {
+    const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+    return key.length > 4 && !verifiedKeys.has(key);
+  }).slice(0, 40);
+
+  for (const track of lookupCandidates) {
+    const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+    if (!key || verifiedKeys.has(key)) continue;
+
+    let albumTitle = typeof track.album_title === 'string' ? track.album_title.trim() : '';
+    let popularity = 0;
+    let recognition = 0;
+    try {
+      const info = await runWithTimeout(
+        () => searchTrackWithDiagnostics(track.artist, track.song, prompt),
+        1200,
+        'studio_album_lookup_timeout'
+      );
+      albumTitle = albumTitle || (typeof info.matchedAlbumTitle === 'string' ? info.matchedAlbumTitle.trim() : '');
+      if (albumTitle && !track.album_title) track.album_title = albumTitle;
+      if (!track.spotify_url && info.spotify_url) track.spotify_url = info.spotify_url;
+      popularity = typeof info.popularity === 'number' && Number.isFinite(info.popularity) ? info.popularity : 0;
+      recognition = typeof info.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
+    } catch {
+      // Keep fallback behavior; unresolved metadata simply won't pass strict gates below.
+    }
+
+    if (popularity < 45 && !(popularity >= 36 && recognition >= 7)) continue;
+    if (!albumTitle) continue;
+
+    const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioAlbumEvidence(track.artist, albumTitle, studioName, true));
+    if (!acceptedMatch) continue;
+
+    const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioAlbumEvidence(track.artist, albumTitle, studioName, true));
+    if (successorMatch) continue;
+
+    const artistKey = normalizeArtistIdentity(track.artist);
+    if (!artistKey) continue;
+    const existingPerArtist = inferredPerArtist.get(artistKey) || 0;
+    if (existingPerArtist >= 1) continue;
+
+    const needsBreadth = verifiedArtistKeys.size + additions.length < 12;
+    if (needsBreadth && verifiedArtistKeys.has(artistKey)) continue;
+
+    additions.push({
+      ...track,
+      reason: `${track.reason} (album-level studio evidence)`
+    });
+    verifiedKeys.add(key);
+    inferredPerArtist.set(artistKey, existingPerArtist + 1);
+  }
+
+  if (additions.length === 0) return verifiedTracks;
+  return dedupeTracks([...verifiedTracks, ...additions]);
 }
 
 function dedupeTracks(tracks: Track[]): Track[] {
@@ -5019,6 +5103,10 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
   if (verification && constraint?.kind === 'credit') {
     verification.evidence_after = getCombinedCreditEvidenceCount((constraint.value || '').trim(), (constraint.creditRole || '').trim());
+  }
+
+  if (constraint?.kind === 'studio') {
+    verifiedTracks = await applyStudioAlbumInferenceFallback(translatedPrompt, candidateTracks, verifiedTracks, constraint);
   }
 
   playlist.tracks = constraint ? verifiedTracks : candidateTracks;

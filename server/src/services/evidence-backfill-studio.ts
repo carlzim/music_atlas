@@ -56,6 +56,14 @@ function buildRecordingCanonicalKey(artist: string, title: string): string {
   return `${normalizeRecordingToken(artist)}::${normalizeRecordingToken(title)}`;
 }
 
+function buildAlbumCanonicalKey(value: string): string {
+  return canonicalizeDisplayName(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normalizeLimit(limit: number | undefined): number {
   const parsed = Number(limit ?? 200);
   if (!Number.isFinite(parsed)) return 200;
@@ -766,8 +774,34 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     INSERT INTO recording_studio_evidence (recording_id, studio_name, studio_name_canonical, source_playlist_id)
     VALUES (?, ?, ?, ?)
   `);
+  const studioAlbumEvidenceExists = db.prepare(`
+    SELECT 1
+    FROM recording_studio_album_evidence
+    WHERE source_playlist_id = ?
+      AND COALESCE(studio_name_canonical, lower(trim(studio_name))) = ?
+      AND COALESCE(artist_name_canonical, lower(trim(artist_name))) = ?
+      AND COALESCE(album_title_canonical, lower(trim(album_title))) = ?
+    LIMIT 1
+  `);
+  const insertStudioAlbumEvidence = db.prepare(`
+    INSERT INTO recording_studio_album_evidence (
+      artist_name,
+      artist_name_canonical,
+      album_title,
+      album_title_canonical,
+      studio_name,
+      studio_name_canonical,
+      source_playlist_id
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
   const deletePriorStudioEvidenceForSource = db.prepare(`
     DELETE FROM recording_studio_evidence
+    WHERE source_playlist_id = ?
+      AND COALESCE(studio_name_canonical, lower(trim(studio_name))) = ?
+  `);
+  const deletePriorStudioAlbumEvidenceForSource = db.prepare(`
+    DELETE FROM recording_studio_album_evidence
     WHERE source_playlist_id = ?
       AND COALESCE(studio_name_canonical, lower(trim(studio_name))) = ?
   `);
@@ -792,6 +826,7 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
     }
     for (const canonicalKey of studioCanonicalKeys) {
       deletePriorStudioEvidenceForSource.run(sourcePlaylistId, canonicalKey);
+      deletePriorStudioAlbumEvidenceForSource.run(sourcePlaylistId, canonicalKey);
     }
   }
 
@@ -835,6 +870,31 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
 
     insertStudioEvidence.run(recordingRow.id, studioName, studioCanonical, sourcePlaylistId);
     insertedEvidence += 1;
+
+    if (track.source === 'discogs') {
+      const albumTitle = (track.releaseTitle || '').trim();
+      const albumCanonical = buildAlbumCanonicalKey(albumTitle);
+      const artistCanonical = normalizeArtistKey(artist);
+      if (albumTitle && albumCanonical && artistCanonical) {
+        const existingAlbumEvidence = studioAlbumEvidenceExists.get(
+          sourcePlaylistId,
+          studioCanonical,
+          artistCanonical,
+          albumCanonical
+        ) as { 1: number } | undefined;
+        if (!existingAlbumEvidence) {
+          insertStudioAlbumEvidence.run(
+            artist,
+            artistCanonical,
+            albumTitle,
+            albumCanonical,
+            studioName,
+            studioCanonical,
+            sourcePlaylistId
+          );
+        }
+      }
+    }
   }
 
   return {

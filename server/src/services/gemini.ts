@@ -201,7 +201,7 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 const GEMINI_RETRY_DELAYS_MS = [0, 1000, 3000];
-const MAX_PLAYLIST_TRACKS = 25;
+const MAX_PLAYLIST_TRACKS = 15;
 const MIN_PLAYLIST_TRACKS = 8;
 const AUTO_BACKFILL_COOLDOWN_MS = Math.max(
   0,

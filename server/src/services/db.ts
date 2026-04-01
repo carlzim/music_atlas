@@ -75,6 +75,21 @@ db.exec(`
 `);
 
 db.exec(`
+  CREATE TABLE IF NOT EXISTS recording_studio_album_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist_name TEXT NOT NULL,
+    artist_name_canonical TEXT,
+    album_title TEXT NOT NULL,
+    album_title_canonical TEXT,
+    studio_name TEXT NOT NULL,
+    studio_name_canonical TEXT,
+    source_playlist_id INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_playlist_id) REFERENCES playlists(id)
+  )
+`);
+
+db.exec(`
   CREATE TABLE IF NOT EXISTS recording_credit_evidence (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recording_id INTEGER NOT NULL,
@@ -294,6 +309,7 @@ db.exec(`
 `);
 
 db.exec('CREATE INDEX IF NOT EXISTS idx_recording_studio_evidence_canonical ON recording_studio_evidence(studio_name_canonical)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_recording_studio_album_evidence_lookup ON recording_studio_album_evidence(artist_name_canonical, album_title_canonical, studio_name_canonical)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_recording_credit_evidence_canonical ON recording_credit_evidence(credit_name_canonical, credit_role)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_artist_membership_person_canonical ON artist_membership_evidence(person_name_canonical)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_artist_membership_band_canonical ON artist_membership_evidence(band_name_canonical)');
@@ -1245,6 +1261,7 @@ export function getAllPlaylists(): Omit<PlaylistRow, 'tracks'>[] {
   const stmt = db.prepare(`
     select id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at 
     FROM playlists 
+    WHERE prompt NOT LIKE '[system]%'
     ORDER BY created_at DESC 
     LIMIT 20
   `);
@@ -1345,6 +1362,7 @@ export function getRelatedPlaylists(playlistId: number): Omit<PlaylistRow, 'trac
     SELECT id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at
     FROM playlists
     WHERE id != ?
+      AND prompt NOT LIKE '[system]%'
   `);
 
   const rows = stmt.all(playlistId) as Omit<PlaylistRow, 'tracks'>[];
@@ -1373,9 +1391,13 @@ export function getRelatedPlaylists(playlistId: number): Omit<PlaylistRow, 'trac
 }
 
 export function getPlaylistsByTag(tag: string): Omit<PlaylistRow, 'tracks'>[] {
+  const target = normalizeTagForComparison(formatTagForDisplay(tag));
+  if (!target) return [];
+
   const stmt = db.prepare(`
     SELECT id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at
     FROM playlists
+    WHERE prompt NOT LIKE '[system]%'
     ORDER BY created_at DESC
   `);
 
@@ -1386,7 +1408,12 @@ export function getPlaylistsByTag(tag: string): Omit<PlaylistRow, 'tracks'>[] {
       if (!row.tags) return false;
       try {
         const parsed = JSON.parse(row.tags);
-        return Array.isArray(parsed) && parsed.includes(tag);
+        if (!Array.isArray(parsed)) return false;
+        return parsed.some((item: unknown) => {
+          if (typeof item !== 'string') return false;
+          const normalized = normalizeTagForComparison(formatTagForDisplay(item));
+          return normalized === target;
+        });
       } catch {
         return false;
       }
@@ -1398,6 +1425,7 @@ export function getPlaylistsByPlace(place: string): Omit<PlaylistRow, 'tracks'>[
   const stmt = db.prepare(`
     SELECT id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at
     FROM playlists
+    WHERE prompt NOT LIKE '[system]%'
     ORDER BY created_at DESC
   `);
 
@@ -1413,6 +1441,7 @@ export function getPlaylistsByScene(scene: string): Omit<PlaylistRow, 'tracks'>[
   const stmt = db.prepare(`
     SELECT id, prompt, title, description, tags, place, scene, places, scenes, countries, cities, studios, venues, influences, credits, created_at
     FROM playlists
+    WHERE prompt NOT LIKE '[system]%'
     ORDER BY created_at DESC
   `);
 
@@ -1882,10 +1911,10 @@ export function getEquipmentAtlas(name: string): {
 }
 
 export function getTopTags(limit = 12): Array<{ tag: string; count: number }> {
-  const stmt = db.prepare('SELECT tags FROM playlists');
+  const stmt = db.prepare("SELECT tags FROM playlists WHERE prompt NOT LIKE '[system]%'");
   const rows = stmt.all() as Array<{ tags: string | null }>;
 
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { tag: string; count: number }>();
 
   for (const row of rows) {
     if (!row.tags) continue;
@@ -1894,23 +1923,30 @@ export function getTopTags(limit = 12): Array<{ tag: string; count: number }> {
       if (!Array.isArray(parsed)) continue;
       for (const tag of parsed) {
         if (typeof tag !== 'string' || tag.length === 0) continue;
-        counts.set(tag, (counts.get(tag) || 0) + 1);
+        const cleaned = formatTagForDisplay(tag);
+        const key = normalizeTagForComparison(cleaned);
+        if (!cleaned || !key || cleaned.startsWith('system')) continue;
+        const existing = counts.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          counts.set(key, { tag: cleaned, count: 1 });
+        }
       }
     } catch {
       continue;
     }
   }
 
-  return Array.from(counts.entries())
-    .map(([tag, count]) => ({ tag, count }))
+  return Array.from(counts.values())
     .sort((a, b) => b.count - a.count)
     .slice(0, limit);
 }
 
 export function getKnownTags(): string[] {
-  const stmt = db.prepare('SELECT tags FROM playlists');
+  const stmt = db.prepare("SELECT tags FROM playlists WHERE prompt NOT LIKE '[system]%'");
   const rows = stmt.all() as Array<{ tags: string | null }>;
-  const known = new Set<string>();
+  const known = new Map<string, string>();
 
   for (const row of rows) {
     if (!row.tags) continue;
@@ -1919,16 +1955,17 @@ export function getKnownTags(): string[] {
       if (!Array.isArray(parsed)) continue;
       for (const tag of parsed) {
         if (typeof tag !== 'string') continue;
-        const trimmed = tag.trim();
-        if (!trimmed) continue;
-        known.add(trimmed);
+        const cleaned = formatTagForDisplay(tag);
+        const key = normalizeTagForComparison(cleaned);
+        if (!cleaned || !key || cleaned.startsWith('system')) continue;
+        if (!known.has(key)) known.set(key, cleaned);
       }
     } catch {
       continue;
     }
   }
 
-  return Array.from(known);
+  return Array.from(known.values());
 }
 
 function normalizeTagForComparison(tag: string): string {
@@ -1938,6 +1975,15 @@ function normalizeTagForComparison(tag: string): string {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+function formatTagForDisplay(tag: string): string {
+  return canonicalizeDisplayName(tag)
+    .replace(/[_-]+/g, ' ')
+    .replace(/[.,;:!?/\\|()[\]{}]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 export function getDuplicateTagCandidates(): Array<{ normalized: string; tags: string[] }> {
@@ -1970,7 +2016,7 @@ export function mergeTagExact(source: string, target: string): { updatedPlaylist
     return { updatedPlaylists: 0 };
   }
 
-  const selectStmt = db.prepare('SELECT id, tags FROM playlists');
+  const selectStmt = db.prepare("SELECT id, tags FROM playlists WHERE prompt NOT LIKE '[system]%'");
   const updateStmt = db.prepare('UPDATE playlists SET tags = ? WHERE id = ?');
   const rows = selectStmt.all() as Array<{ id: number; tags: string | null }>;
 
@@ -2019,9 +2065,9 @@ export function mergeTagExact(source: string, target: string): { updatedPlaylist
 }
 
 export function getTagStats(): Array<{ tag: string; count: number }> {
-  const stmt = db.prepare('SELECT tags FROM playlists');
+  const stmt = db.prepare("SELECT tags FROM playlists WHERE prompt NOT LIKE '[system]%'");
   const rows = stmt.all() as Array<{ tags: string | null }>;
-  const counts = new Map<string, number>();
+  const counts = new Map<string, { tag: string; count: number }>();
 
   for (const row of rows) {
     if (!row.tags) continue;
@@ -2037,12 +2083,19 @@ export function getTagStats(): Array<{ tag: string; count: number }> {
 
     for (const item of parsed) {
       if (typeof item !== 'string') continue;
-      counts.set(item, (counts.get(item) || 0) + 1);
+      const cleaned = formatTagForDisplay(item);
+      const key = normalizeTagForComparison(cleaned);
+      if (!cleaned || !key || cleaned.startsWith('system')) continue;
+      const existing = counts.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        counts.set(key, { tag: cleaned, count: 1 });
+      }
     }
   }
 
-  return Array.from(counts.entries())
-    .map(([tag, count]) => ({ tag, count }))
+  return Array.from(counts.values())
     .sort((a, b) => b.count - a.count);
 }
 
@@ -3446,6 +3499,56 @@ export function hasRecordingStudioEvidence(
   }
 }
 
+function buildAlbumCanonicalKey(value: string): string {
+  return canonicalizeDisplayName(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function hasRecordingStudioAlbumEvidence(
+  artist: string,
+  albumTitle: string,
+  studioName: string,
+  trustedOnly = false
+): boolean {
+  const artistCanonical = buildArtistCanonicalKey(artist);
+  const albumCanonical = buildAlbumCanonicalKey(albumTitle);
+  const studioCanonical = buildStudioCanonicalKey(studioName);
+  if (!artistCanonical || !albumCanonical || !studioCanonical) return false;
+
+  try {
+    const trustedJoinClause = trustedOnly
+      ? 'INNER JOIN playlists p ON p.id = rsae.source_playlist_id'
+      : '';
+    const trustedWhereClause = trustedOnly
+      ? 'AND (p.prompt LIKE ? OR p.prompt LIKE ?)'
+      : '';
+
+    const params: Array<string> = [artistCanonical, albumCanonical, studioCanonical];
+    if (trustedOnly) {
+      params.push('[system] studio evidence backfill from discogs ::%');
+      params.push('[system] studio evidence backfill from musicbrainz ::%');
+    }
+
+    const row = db.prepare(`
+      SELECT 1 AS matched
+      FROM recording_studio_album_evidence rsae
+      ${trustedJoinClause}
+      WHERE COALESCE(rsae.artist_name_canonical, lower(trim(rsae.artist_name))) = ?
+        AND COALESCE(rsae.album_title_canonical, lower(trim(rsae.album_title))) = ?
+        AND COALESCE(rsae.studio_name_canonical, lower(trim(rsae.studio_name))) = ?
+        ${trustedWhereClause}
+      LIMIT 1
+    `).get(...params) as { matched: number } | undefined;
+
+    return Boolean(row && row.matched === 1);
+  } catch {
+    return false;
+  }
+}
+
 export function getTracksByRecordingStudioEvidence(
   studioName: string,
   limit = 120,
@@ -3470,13 +3573,14 @@ export function getTracksByRecordingStudioEvidence(
     params.push(safeLimit);
 
     const rows = db.prepare(`
-      SELECT DISTINCT r.artist AS artist, r.title AS title
+      SELECT r.artist AS artist, r.title AS title, COUNT(*) AS evidence_count, MAX(rse.created_at) AS last_seen
       FROM recording_studio_evidence rse
       INNER JOIN recordings r ON r.id = rse.recording_id
       ${trustedJoinClause}
       WHERE COALESCE(rse.studio_name_canonical, lower(trim(rse.studio_name))) = ?
       ${trustedWhereClause}
-      ORDER BY r.created_at DESC
+      GROUP BY r.id, r.artist, r.title
+      ORDER BY evidence_count DESC, last_seen DESC
       LIMIT ?
     `).all(...params) as Array<{ artist?: string; title?: string }>;
 

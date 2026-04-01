@@ -58,7 +58,7 @@ function getSpotifyChunkFailureCategory(status: number | 'fetch_error', fetchErr
 }
 
 const DEFAULT_PLAYLIST_TIMEOUT_MS = 45000;
-const DEFAULT_STUDIO_PLAYLIST_TIMEOUT_MS = 90000;
+const DEFAULT_STUDIO_PLAYLIST_TIMEOUT_MS = 180000;
 const DEFAULT_SPOTIFY_ADD_TRACKS_TIMEOUT_MS = 20000;
 const DEFAULT_SPOTIFY_ADD_TRACKS_MAX_ATTEMPTS = 3;
 const DEFAULT_SPOTIFY_ADD_TRACKS_BASE_RETRY_DELAY_MS = 400;
@@ -1727,7 +1727,7 @@ app.get('/api/playlists/:id', (req, res) => {
   const id = parseInt(req.params.id);
   const playlist = getPlaylistById(id);
   
-  if (!playlist) {
+  if (!playlist || /^\s*\[system\]/i.test(playlist.prompt || '')) {
     res.status(404).json({ error: 'Playlist not found' });
     return;
   }

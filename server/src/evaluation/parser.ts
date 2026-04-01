@@ -3,6 +3,7 @@ import {
   detectCreditPromptForEval,
   extractPlaceEntityFromPromptForEval,
   parsePlaylistResponseForEval,
+  sanitizePlaylistMetadataForEval,
 } from '../services/gemini.js';
 
 interface ParserCaseResult {
@@ -1000,6 +1001,28 @@ function runCurationModeConflictPrefersDeepCutsCase(): ParserCaseResult {
   };
 }
 
+function runStudioMetadataSafetySoftBlockCase(): ParserCaseResult {
+  const id = 'studio_metadata_soft_block_unverified_address_and_rename_chain';
+  const risky = sanitizePlaylistMetadataForEval(
+    {
+      title: 'Journey through Karlavagen 71',
+      description: "Journey through the hallowed halls of Sweden's iconic studio at Karlavagen 71 in Stockholm, known first as Metronome, then EMI Studios, and finally Rixmixningsverket.",
+    },
+    'studio',
+    'EMI Studios, Stockholm'
+  );
+
+  const text = `${risky.title} ${risky.description}`.toLowerCase();
+  const pass = !/karlavagen|karlavagen\s*71|known first as|\bthen\b|\bfinally\b/.test(text)
+    && risky.title.trim().length > 0
+    && risky.description.trim().length > 0;
+  return {
+    id,
+    pass,
+    details: `title="${risky.title}" description="${risky.description}"`,
+  };
+}
+
 function run(): void {
   const strict = process.argv.includes('--strict');
   const results: ParserCaseResult[] = [
@@ -1062,6 +1085,7 @@ function run(): void {
     runCurationModeEssentialIntentCase(),
     runCurationModeDeepCutsIntentCase(),
     runCurationModeConflictPrefersDeepCutsCase(),
+    runStudioMetadataSafetySoftBlockCase(),
     runSongTitleFeaturingExtractCase(),
     runSongTitleDuetExtractCase(),
     runFullArtistNamePreservedCase(),

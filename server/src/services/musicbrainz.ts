@@ -333,6 +333,85 @@ export async function resolveMusicBrainzStudioPlace(
   return best?.candidate || null;
 }
 
+export async function resolveMusicBrainzStudioPlaces(
+  studioName: string,
+  acceptedNames: string[] = [],
+  limit = 4
+): Promise<MusicBrainzPlaceSearchResult[]> {
+  const base = studioName.trim();
+  if (!base) return [];
+
+  const safeLimit = Math.max(1, Math.min(8, Math.floor(limit)));
+  const queries = Array.from(
+    new Set(
+      [
+        base,
+        ...acceptedNames,
+        base.replace(/,\s*london$/i, ''),
+        base.replace(/,\s*stockholm$/i, ''),
+        base.replace(/,\s*los angeles$/i, ''),
+      ]
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 8);
+
+  const baseCanonical = normalizeStudioMatch(base);
+  const disambiguationHints = base
+    .toLowerCase()
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(1);
+
+  const ranked = new Map<string, { candidate: MusicBrainzPlaceSearchResult; rank: number }>();
+
+  for (const query of queries) {
+    let candidates: MusicBrainzPlaceSearchResult[] = [];
+    try {
+      candidates = await searchMusicBrainzPlacesByName(query, 12);
+    } catch {
+      candidates = [];
+    }
+
+    for (const candidate of candidates) {
+      const type = normalizeStudioType(candidate.type);
+      if (type && type !== 'studio') continue;
+
+      const candidateCanonical = normalizeStudioMatch(candidate.name);
+      if (!candidateCanonical) continue;
+
+      const exact = candidateCanonical === baseCanonical;
+      const includes = !exact && (candidateCanonical.includes(baseCanonical) || baseCanonical.includes(candidateCanonical));
+      const score = Number.isFinite(candidate.score) ? candidate.score : 0;
+
+      let disambiguationBoost = 0;
+      const disambiguation = (candidate.disambiguation || '').toLowerCase();
+      if (disambiguationHints.length > 0 && disambiguation) {
+        for (const hint of disambiguationHints) {
+          if (hint && disambiguation.includes(hint)) {
+            disambiguationBoost += 120;
+          }
+        }
+      }
+
+      const roomBoost = /\bstudio\s+[123]\b/i.test(candidate.name) ? 40 : 0;
+      const rank = (exact ? 10000 : includes ? 7000 : 0) + disambiguationBoost + roomBoost + score;
+      if (rank <= 0) continue;
+
+      const existing = ranked.get(candidate.id);
+      if (!existing || rank > existing.rank) {
+        ranked.set(candidate.id, { candidate, rank });
+      }
+    }
+  }
+
+  return Array.from(ranked.values())
+    .sort((a, b) => b.rank - a.rank)
+    .slice(0, safeLimit)
+    .map((row) => row.candidate);
+}
+
 export async function fetchMusicBrainzStudioTracksByPlace(
   placeMbid: string,
   limit = 200

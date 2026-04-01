@@ -20,6 +20,7 @@ export interface SpotifyTrackCandidateInfo extends SpotifyTrackInfo {
 
 export interface SpotifyTrackDebugInfo extends SpotifyTrackInfo {
   score: number | null;
+  popularity?: number | null;
   matchedTitle: string | null;
   matchedAlbumTitle: string | null;
   artist_match_mode?: 'exact' | 'prefix' | 'alias' | 'other';
@@ -1020,6 +1021,7 @@ async function searchTrackInternal(artist: string, song: string, promptContext =
       release_year: bestCandidate.release_year,
       duration_ms: bestCandidate.duration_ms,
       score: bestCandidate.score,
+      popularity: bestCandidate.popularity,
       matchedTitle: bestCandidate.title || null,
       matchedAlbumTitle: bestCandidate.album_title || null,
       artist_match_mode: bestCandidate.artist_match_mode,

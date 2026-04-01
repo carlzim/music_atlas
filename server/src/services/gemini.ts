@@ -3952,7 +3952,7 @@ function applyStudioClassicalPolicy(prompt: string, tracks: Track[]): Track[] {
 
   const filtered = tracks.filter((track) => !isLikelyClassicalOrScoreTrack(track.artist, track.song));
   if (filtered.length >= MIN_PLAYLIST_TRACKS) return filtered;
-  return filtered.length > 0 ? filtered : tracks;
+  return tracks;
 }
 
 function enforceStudioClassicalRatio(prompt: string, tracks: Track[]): Track[] {

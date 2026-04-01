@@ -1622,6 +1622,141 @@ function sanitizeStudioLabel(raw: string): string {
     .trim();
 }
 
+function normalizeMetadataGuardValue(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function hasUnverifiedMetadataClaim(value: string): boolean {
+  const text = normalizeMetadataGuardValue(value || '');
+  if (!text.trim()) return false;
+
+  const patterns: RegExp[] = [
+    /\b(?:located|situated|based|found)\s+(?:at|on)\b/,
+    /\b[a-z0-9.'-]*(?:vagen|gatan)\s+\d{1,5}[a-z]?\b/,
+    /\b\d{1,5}[a-z]?\s+[a-z0-9 .'-]{1,50}\b(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|way|gatan|vagen)\b/,
+    /\b(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|way|gatan|vagen)\b[^.?!]{0,40}\b\d{1,5}[a-z]?\b/,
+    /\bknown\s+first\s+as\b/,
+    /\bfirst\s+known\s+as\b/,
+    /\bfirst\s+as\b[^.?!]{0,140}\bthen\b/,
+    /\bthen\b[^.?!]{0,120}\bfinally\b/,
+    /\b(?:formerly|previously)\s+(?:known|called|named)\b/,
+  ];
+
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function hasRenameHistoryClaim(value: string): boolean {
+  const text = normalizeMetadataGuardValue(value || '');
+  if (!text.trim()) return false;
+  return /\bknown\s+first\s+as\b|\bfirst\s+known\s+as\b|\bfirst\s+as\b[^.?!]{0,140}\bthen\b|\b(?:formerly|previously)\s+(?:known|called|named)\b/.test(text);
+}
+
+function rewriteUnverifiedMetadataClaims(value: string): string {
+  let next = value || '';
+
+  const removals: RegExp[] = [
+    /\b(?:located|situated|based|found)\s+(?:at|on)\s+[^.?!]{0,140}/gi,
+    /\b[a-z0-9.'-]*(?:v[aä]gen|gatan)\s+\d{1,5}[a-z]?\b[^.?!]{0,60}/gi,
+    /\b\d{1,5}[a-z]?\s+[a-z0-9 .'-]{1,50}\b(?:street|st\.?|avenue|ave\.?|road|rd\.?|boulevard|blvd\.?|lane|ln\.?|drive|dr\.?|way|gatan|v[aä]gen)\b[^.?!]{0,80}/gi,
+    /\b(?:known\s+first\s+as|first\s+known\s+as|first\s+as)\b[^.?!]{0,180}/gi,
+    /\b(?:formerly|previously)\s+(?:known|called|named)\b[^.?!]{0,140}/gi,
+    /\bthen\b[^.?!]{0,120}\bfinally\b[^.?!]{0,120}/gi,
+  ];
+
+  for (const pattern of removals) {
+    next = next.replace(pattern, ' ');
+  }
+
+  next = next.replace(/\b(?:known\s+first\s+as|first\s+known\s+as|first\s+as|formerly|previously|then|finally)\b/gi, ' ');
+
+  return next
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([,.;:!?]){2,}/g, '$1')
+    .replace(/[,:;]\s*$/, '')
+    .trim();
+}
+
+function getConstraintDisplayLabel(constraint: PromptConstraint | null): string {
+  if (!constraint) return 'this theme';
+  if (constraint.kind === 'studio') {
+    const rawStudio = constraint.value
+      || (Array.isArray(constraint.studioAcceptedNames) ? constraint.studioAcceptedNames[0] || '' : '');
+    return sanitizeStudioLabel(rawStudio) || 'this studio';
+  }
+  if (constraint.kind === 'credit') {
+    return constraint.value?.trim() || 'this creator';
+  }
+  return constraint.value?.trim() || 'this theme';
+}
+
+function buildMetadataFallback(constraint: PromptConstraint | null): { title: string; description: string } {
+  const label = getConstraintDisplayLabel(constraint);
+  if (constraint?.kind === 'studio') {
+    return {
+      title: `Echoes from ${label}`,
+      description: `A curated journey through songs linked to ${label}, selected for impact, range, and lasting resonance. It keeps the focus on the music while avoiding unverified historical details.`
+    };
+  }
+
+  if (constraint?.kind === 'credit') {
+    return {
+      title: `In the Orbit of ${label}`,
+      description: `A focused selection of songs associated with ${label}, chosen for musical impact, context, and listening flow. The write-up stays expressive without leaning on unverified factual claims.`
+    };
+  }
+
+  return {
+    title: 'Curated Playlist',
+    description: 'A curated playlist selected for musical impact, range, and listening flow.'
+  };
+}
+
+function applyMetadataSafetyGuard(playlist: Playlist, constraint: PromptConstraint | null): Playlist {
+  if (!constraint || (constraint.kind !== 'studio' && constraint.kind !== 'credit')) return playlist;
+
+  const fallback = buildMetadataFallback(constraint);
+  let safeTitle = (playlist.title || '').trim();
+  let safeDescription = (playlist.description || '').trim();
+
+  if (!safeTitle) safeTitle = fallback.title;
+  if (!safeDescription) safeDescription = fallback.description;
+
+  if (hasUnverifiedMetadataClaim(safeTitle)) {
+    if (hasRenameHistoryClaim(safeTitle)) {
+      safeTitle = fallback.title;
+    } else {
+      const rewritten = rewriteUnverifiedMetadataClaims(safeTitle);
+      safeTitle = rewritten && !hasUnverifiedMetadataClaim(rewritten)
+        ? rewritten
+        : fallback.title;
+    }
+  }
+
+  if (hasUnverifiedMetadataClaim(safeDescription)) {
+    if (hasRenameHistoryClaim(safeDescription)) {
+      safeDescription = fallback.description;
+    } else {
+      const rewritten = rewriteUnverifiedMetadataClaims(safeDescription);
+      safeDescription = rewritten && !hasUnverifiedMetadataClaim(rewritten)
+        ? rewritten
+        : fallback.description;
+    }
+  }
+
+  if (!safeTitle) safeTitle = fallback.title;
+  if (!safeDescription) safeDescription = fallback.description;
+
+  return {
+    ...playlist,
+    title: safeTitle,
+    description: safeDescription,
+  };
+}
+
 function studioLabelQualityScore(value: string): number {
   const trimmed = value.trim();
   if (!trimmed) return -100;
@@ -4169,6 +4304,7 @@ Requirements:
 - If the prompt says tracks should be connected to a specific studio/producer/venue/scene/relationship, include only tracks that fit that relation with confidence.
 - If confidence is low for a track, exclude it rather than guessing.
 - For constraint-heavy prompts, prioritize factual relation over vibe.
+- Keep title/description expressive, but do not include exact addresses, street-name+number details, or rename-history chains unless explicitly verified in trusted app metadata.
 
 ${RESPONSE_FORMAT_INSTRUCTIONS}`;
 
@@ -4181,6 +4317,7 @@ Requirements:
 - Be conservative: if unsure that a track matches the credit constraint, exclude it.
 - Do not invent factual claims.
 - Keep reasons short and focused on why the track fits the requested credit relationship.
+- Keep title/description expressive, but avoid exact addresses, street-name+number details, and rename-history chains unless explicitly verified in trusted app metadata.
 
 ${RESPONSE_FORMAT_INSTRUCTIONS}`;
 
@@ -4384,6 +4521,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
 
   const generationSystemPrompt = constraint?.kind === 'credit' ? CREDIT_SYSTEM_PROMPT : SYSTEM_PROMPT;
   const historyOrderingSuffix = buildHistoryOrderingSuffix(translatedPrompt);
+  const metadataSafetySuffix = constraint && (constraint.kind === 'studio' || constraint.kind === 'credit')
+    ? `Metadata safety rules:\n- Keep title and description creative and vivid, but avoid exact addresses or street-name+number details.\n- Do not include rename-history chains like "first as ... then ... finally ..." unless explicitly verified in trusted app metadata.\n- If unsure, prefer high-level musical language over factual historical claims.`
+    : '';
   const generationUserPrompt = constraint?.kind === 'credit'
     ? `${translatedPrompt}\n\nCredit role: ${constraint.creditRole || ''}\nCredit name: ${constraint.value || ''}`
     : translatedPrompt;
@@ -4393,10 +4533,13 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   const generationPromptWithHints = graphHintText
     ? `${generationUserPromptWithOrdering}\n\n${graphHintText}`
     : generationUserPromptWithOrdering;
+  const generationPrompt = metadataSafetySuffix
+    ? `${generationPromptWithHints}\n\n${metadataSafetySuffix}`
+    : generationPromptWithHints;
 
   const result = await callGeminiWithRetry(() => model.generateContent([
     generationSystemPrompt,
-    generationPromptWithHints
+    generationPrompt
   ]));
 
   const text = result.response.text();
@@ -4418,6 +4561,8 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       throw error;
     }
   }
+
+  playlist = applyMetadataSafetyGuard(playlist, constraint);
 
   let truthCreditCandidates = constraint?.kind === 'credit'
     ? getTruthCreditCandidates((constraint.value || '').trim(), (constraint.creditRole || '').trim(), 220)
@@ -5542,6 +5687,30 @@ function parsePlaylistResponse(text: string): Playlist {
 
 export function parsePlaylistResponseForEval(text: string): Playlist {
   return parsePlaylistResponse(text);
+}
+
+export function sanitizePlaylistMetadataForEval(
+  playlist: { title: string; description: string },
+  kind: 'studio' | 'credit' = 'studio',
+  value = 'EMI Studios, Stockholm'
+): { title: string; description: string } {
+  const constraint: PromptConstraint = {
+    kind,
+    value,
+    associatedArtists: new Set<string>(),
+    strength: 'strict',
+  };
+
+  const sanitized = applyMetadataSafetyGuard(
+    {
+      title: playlist.title,
+      description: playlist.description,
+      tracks: [],
+    },
+    constraint
+  );
+
+  return { title: sanitized.title, description: sanitized.description };
 }
 
 export function detectPlaylistCurationModeForEval(prompt: string): { mode: PlaylistCurationMode; inferredFromPrompt: boolean } {

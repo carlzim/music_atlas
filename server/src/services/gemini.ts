@@ -2769,7 +2769,7 @@ async function applyStudioAlbumInferenceFallback(
 ): Promise<Track[]> {
   if (!constraint || constraint.kind !== 'studio') return verifiedTracks;
   if (promptWantsClassicalMusic(prompt)) return verifiedTracks;
-  if (!isMainstreamStudioPrompt(prompt)) return verifiedTracks;
+  const mainstreamStudioPrompt = isMainstreamStudioPrompt(prompt);
 
   const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
     ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
@@ -2788,6 +2788,10 @@ async function applyStudioAlbumInferenceFallback(
     return key.length > 4 && !verifiedKeys.has(key);
   }).slice(0, STUDIO_CANDIDATE_POOL_MAX);
 
+  const diagnosticsLookupCap = verifiedTracks.length < MIN_PLAYLIST_TRACKS
+    ? Math.min(lookupCandidates.length, Math.max(STUDIO_DIAGNOSTICS_CAP, 220))
+    : STUDIO_DIAGNOSTICS_CAP;
+
   for (let candidateIndex = 0; candidateIndex < lookupCandidates.length; candidateIndex += 1) {
     const track = lookupCandidates[candidateIndex];
     if (!track) continue;
@@ -2797,7 +2801,7 @@ async function applyStudioAlbumInferenceFallback(
     let albumTitle = typeof track.album_title === 'string' ? track.album_title.trim() : '';
     let popularity = 0;
     let recognition = 0;
-    if (candidateIndex < STUDIO_DIAGNOSTICS_CAP) {
+    if (candidateIndex < diagnosticsLookupCap) {
       try {
         const info = await runWithTimeout(
           () => searchTrackWithDiagnostics(track.artist, track.song, prompt),
@@ -2814,7 +2818,11 @@ async function applyStudioAlbumInferenceFallback(
       }
     }
 
-    if (popularity < 45 && !(popularity >= 36 && recognition >= 7)) continue;
+    if (mainstreamStudioPrompt) {
+      if (popularity < 45 && !(popularity >= 36 && recognition >= 7)) continue;
+    } else {
+      if (popularity < 32 && !(popularity >= 26 && recognition >= 6)) continue;
+    }
     if (!albumTitle) continue;
 
     const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioAlbumEvidence(track.artist, albumTitle, studioName, true));
@@ -2826,9 +2834,11 @@ async function applyStudioAlbumInferenceFallback(
     const artistKey = normalizeArtistIdentity(track.artist);
     if (!artistKey) continue;
     const existingPerArtist = inferredPerArtist.get(artistKey) || 0;
-    if (existingPerArtist >= 1) continue;
+    const perArtistCap = verifiedTracks.length < MIN_PLAYLIST_TRACKS ? 2 : 1;
+    if (existingPerArtist >= perArtistCap) continue;
 
-    const needsBreadth = verifiedArtistKeys.size + additions.length < 12;
+    const needsMinimumSize = verifiedTracks.length + additions.length < MIN_PLAYLIST_TRACKS;
+    const needsBreadth = !needsMinimumSize && verifiedArtistKeys.size + additions.length < 12;
     if (needsBreadth && verifiedArtistKeys.has(artistKey)) continue;
 
     additions.push({
@@ -2836,6 +2846,7 @@ async function applyStudioAlbumInferenceFallback(
       reason: `${track.reason} (album-level studio evidence)`
     });
     verifiedKeys.add(key);
+    verifiedArtistKeys.add(artistKey);
     inferredPerArtist.set(artistKey, existingPerArtist + 1);
   }
 
@@ -3788,6 +3799,8 @@ function composeStudioFinalSelection(
 
   const desiredCount = Math.min(targetTracks, tracks.length);
   const computedUniqueArtistTarget = Math.max(8, Math.ceil(desiredCount * 0.6));
+  const primaryPoolSize = Math.min(tracks.length, Math.max(desiredCount * 2, 24));
+  const primaryPool = tracks.slice(0, primaryPoolSize);
   const selected: Track[] = [];
   const selectedTrackKeys = new Set<string>();
   const artistCounts = new Map<string, number>();
@@ -3811,16 +3824,31 @@ function composeStudioFinalSelection(
   };
 
   // Pass A: 1 track per artist until unique target is met or shortlist exhausted.
-  for (const track of tracks) {
+  for (const track of primaryPool) {
     if (selected.length >= desiredCount) break;
     if (artistCounts.size >= computedUniqueArtistTarget) break;
     addTrackIfAllowed(track, 1, true);
   }
 
+  if (artistCounts.size < computedUniqueArtistTarget) {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      if (artistCounts.size >= computedUniqueArtistTarget) break;
+      addTrackIfAllowed(track, 1, true);
+    }
+  }
+
   // Pass B: fill up to target size with artist cap 2.
-  for (const track of tracks) {
+  for (const track of primaryPool) {
     if (selected.length >= desiredCount) break;
     addTrackIfAllowed(track, 2, false);
+  }
+
+  if (selected.length < desiredCount) {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      addTrackIfAllowed(track, 2, false);
+    }
   }
 
   const minimumSizeTarget = Math.min(MIN_PLAYLIST_TRACKS, desiredCount);
@@ -3830,6 +3858,27 @@ function composeStudioFinalSelection(
 
   // Pass C (fallback only): open cap to 3 if unique target or minimum size would otherwise miss.
   if (shouldUseArtistCap3Fallback) {
+    for (const track of primaryPool) {
+      if (selected.length >= desiredCount) break;
+      addTrackIfAllowed(track, 3, false);
+    }
+  }
+
+  if (shouldUseArtistCap3Fallback && selected.length < desiredCount) {
+    for (const track of tracks) {
+      if (selected.length >= desiredCount) break;
+      addTrackIfAllowed(track, 3, false);
+    }
+  }
+
+  if (selected.length === 0) {
+    for (const track of primaryPool) {
+      if (selected.length >= desiredCount) break;
+      addTrackIfAllowed(track, 3, false);
+    }
+  }
+
+  if (selected.length === 0) {
     for (const track of tracks) {
       if (selected.length >= desiredCount) break;
       addTrackIfAllowed(track, 3, false);

@@ -205,6 +205,60 @@ function runStudioIdentityPolarCase(): StudioEvidenceCaseResult {
   };
 }
 
+function runStudioIdentitySunDefaultCase(): StudioEvidenceCaseResult {
+  const id = 'studio_identity_sun_default_memphis';
+  const resolved = resolveStudioIdentityFromPrompt('Best recordings made in Sun Studios');
+  const accepted = Array.isArray(resolved?.acceptedStudioNames) ? resolved.acceptedStudioNames : [];
+  const hasMemphisAlias = accepted.some((value) => value.toLowerCase().includes('memphis'));
+  const pass = resolved?.key === 'sun_studio_memphis' && hasMemphisAlias;
+  return {
+    id,
+    pass,
+    details: `identity=${resolved?.key || 'none'} accepted=${accepted.length}`,
+  };
+}
+
+function runStudioIdentityFameCase(): StudioEvidenceCaseResult {
+  const id = 'studio_identity_fame_resolution';
+  const resolved = resolveStudioIdentityFromPrompt('Best recordings made in FAME Studios');
+  const pass = resolved?.key === 'fame_studios_muscle_shoals';
+  return {
+    id,
+    pass,
+    details: `identity=${resolved?.key || 'none'}`,
+  };
+}
+
+function runStudioIdentityMuscleShoalsDefaultCase(): StudioEvidenceCaseResult {
+  const id = 'studio_identity_muscle_shoals_default_msss';
+  const resolved = resolveStudioIdentityFromPrompt('Best recordings made in Muscle Shoals studio');
+  const pass = resolved?.key === 'muscle_shoals_sound_studio';
+  return {
+    id,
+    pass,
+    details: `identity=${resolved?.key || 'none'}`,
+  };
+}
+
+function runStudioIdentityMuscleShoalsSeparationCase(): StudioEvidenceCaseResult {
+  const id = 'studio_identity_fame_and_msss_are_separate';
+  const fame = resolveStudioIdentityFromPrompt('Best recordings made in FAME Studios');
+  const msss = resolveStudioIdentityFromPrompt('Best recordings made in Muscle Shoals Sound Studio');
+  const fameAccepted = new Set((fame?.acceptedStudioNames || []).map((value) => value.toLowerCase()));
+  const msssAccepted = new Set((msss?.acceptedStudioNames || []).map((value) => value.toLowerCase()));
+  const fameLeaksMsss = Array.from(fameAccepted).some((value) => value.includes('muscle shoals sound'));
+  const msssLeaksFame = Array.from(msssAccepted).some((value) => value.includes('fame'));
+  const pass = fame?.key === 'fame_studios_muscle_shoals'
+    && msss?.key === 'muscle_shoals_sound_studio'
+    && !fameLeaksMsss
+    && !msssLeaksFame;
+  return {
+    id,
+    pass,
+    details: `fame=${fame?.key || 'none'} msss=${msss?.key || 'none'} fame_leak=${fameLeaksMsss} msss_leak=${msssLeaksFame}`,
+  };
+}
+
 function run(): void {
   const strict = process.argv.includes('--strict');
   const db = new Database('playlists.db');
@@ -216,6 +270,10 @@ function run(): void {
     runStudioIdentityAirCase(),
     runStudioIdentityGoldStarCase(),
     runStudioIdentityPolarCase(),
+    runStudioIdentitySunDefaultCase(),
+    runStudioIdentityFameCase(),
+    runStudioIdentityMuscleShoalsDefaultCase(),
+    runStudioIdentityMuscleShoalsSeparationCase(),
   ];
 
   const passed = results.filter((result) => result.pass).length;

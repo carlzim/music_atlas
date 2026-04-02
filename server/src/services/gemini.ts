@@ -1889,6 +1889,44 @@ function getStudioTrackCommercialPenalty(artistName: string, songTitle: string):
   return penalty;
 }
 
+function buildDiverseDiagnosticsTrackWindow(tracks: Track[], limit: number): Track[] {
+  if (tracks.length <= 1 || limit <= 1) return tracks.slice(0, Math.max(0, limit));
+  const target = Math.min(limit, tracks.length);
+  const selected: Track[] = [];
+  const selectedKeys = new Set<string>();
+  const artistCounts = new Map<string, number>();
+
+  const addPass = (artistCap: number): void => {
+    for (const track of tracks) {
+      if (selected.length >= target) break;
+      const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+      if (!key || selectedKeys.has(key)) continue;
+      const artistKey = normalizeArtistIdentity(track.artist);
+      if (!artistKey) continue;
+      const count = artistCounts.get(artistKey) || 0;
+      if (count >= artistCap) continue;
+      selected.push(track);
+      selectedKeys.add(key);
+      artistCounts.set(artistKey, count + 1);
+    }
+  };
+
+  addPass(1);
+  if (selected.length < target) addPass(2);
+  if (selected.length < target) addPass(3);
+  if (selected.length < target) {
+    for (const track of tracks) {
+      if (selected.length >= target) break;
+      const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+      if (!key || selectedKeys.has(key)) continue;
+      selected.push(track);
+      selectedKeys.add(key);
+    }
+  }
+
+  return selected;
+}
+
 async function rankStudioTracksByRecognition(
   _prompt: string,
   tracks: Track[],
@@ -1945,9 +1983,13 @@ async function rankStudioTracksByRecognition(
         if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
         return a.index - b.index;
       })
-      .slice(0, lookupCap);
+      .slice(0, Math.min(scored.length, Math.max(lookupCap * 2, 24)));
 
-    await Promise.all(preRankedForLookup.map(async (item) => {
+    const preRankedLookupTracks = buildDiverseDiagnosticsTrackWindow(preRankedForLookup.map((row) => row.track), lookupCap);
+    const allowedLookupKeys = new Set(preRankedLookupTracks.map((track) => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
+    const preRankedForLookupDiverse = preRankedForLookup.filter((item) => allowedLookupKeys.has(`${normalizeArtistIdentity(item.track.artist)}::${normalize(item.track.song)}`));
+
+    await Promise.all(preRankedForLookupDiverse.map(async (item) => {
       const info = await withTimeout(
         searchTrackWithDiagnostics(item.track.artist, item.track.song, _prompt),
         lookupTimeoutMs
@@ -2000,8 +2042,13 @@ async function applyStudioMainstreamRecognitionGate(prompt: string, tracks: Trac
     });
   };
 
+  const lookupTracks = buildDiverseDiagnosticsTrackWindow(
+    tracks.slice(0, Math.min(tracks.length, Math.max(lookupCap * 2, 24))),
+    lookupCap
+  );
+
   const scored = await Promise.all(
-    tracks.slice(0, lookupCap).map(async (track, index) => {
+    lookupTracks.map(async (track, index) => {
       const info = await withTimeout(searchTrackWithDiagnostics(track.artist, track.song, prompt), lookupTimeoutMs);
       const recognition = typeof info?.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
       const popularity = typeof info?.popularity === 'number' && Number.isFinite(info.popularity) ? info.popularity : 0;

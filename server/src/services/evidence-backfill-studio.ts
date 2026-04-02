@@ -384,6 +384,11 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
   if (musicBrainzEnabled) {
     attemptedMusicBrainz = true;
     try {
+      const placeLockedStudioKeys = new Set([
+        'sun_studio_memphis',
+        'fame_studios_muscle_shoals',
+        'muscle_shoals_sound_studio',
+      ]);
       const explicitPlaceIds = Array.from(
         new Set(
           [
@@ -414,9 +419,17 @@ export async function backfillStudioFromDiscogs(params: StudioEvidenceBackfillPa
         }
       }
 
-      const rankedPlaces = Array.from(uniquePlaces.values())
-        .sort((a, b) => b.score - a.score)
-        .slice(0, mainstreamPrompt && !wantsClassicalMusic ? 1 : 4);
+      const useExplicitPlaceLock = Boolean(
+        studioIdentityKey
+        && placeLockedStudioKeys.has(studioIdentityKey)
+        && explicitPlaceIds.length > 0
+      );
+
+      const rankedPlaces = useExplicitPlaceLock
+        ? explicitPlaceIds.map((id) => ({ id, name: studioName, score: 1000, type: 'Studio', disambiguation: 'explicit-lock' }))
+        : Array.from(uniquePlaces.values())
+            .sort((a, b) => b.score - a.score)
+            .slice(0, mainstreamPrompt && !wantsClassicalMusic ? 1 : 4);
 
       if (rankedPlaces.length > 0) {
         musicBrainzPlaceId = rankedPlaces[0].id;

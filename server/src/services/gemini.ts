@@ -112,6 +112,34 @@ interface TruthDetails {
     final_unique_artist_count?: number;
     used_artist_cap_3_fallback?: boolean;
     fallback_reason?: 'none' | 'unique_target_gap' | 'size_floor_gap';
+    top_zone_protected_n?: number;
+    top_zone_change_count_after_tail_guard?: number;
+    top_zone_change_count_after_compose?: number;
+    top_zone_regression_flag?: boolean;
+    snapshot_top10_before_early_dedupe?: Array<{ artist: string; song: string }>;
+    snapshot_top10_after_early_dedupe?: Array<{ artist: string; song: string }>;
+    snapshot_top10_before_tail_guard?: Array<{ artist: string; song: string }>;
+    snapshot_top10_after_tail_guard?: Array<{ artist: string; song: string }>;
+    snapshot_top10_before_compose?: Array<{ artist: string; song: string }>;
+    snapshot_top10_after_compose?: Array<{ artist: string; song: string }>;
+    early_dedupe_input_tracks?: number;
+    early_dedupe_output_tracks?: number;
+    early_dedupe_removed_tracks?: number;
+    tail_guard_applied?: boolean;
+    tail_guard_dropped_count?: number;
+    tail_guard_skip_reason_counts?: Record<string, number>;
+    tail_quality_threshold_base?: number;
+    tail_quality_threshold_effective?: number;
+    tail_threshold_relaxed?: boolean;
+    tail_threshold_relax_steps?: number;
+    compose_skip_reason_counts?: Record<string, number>;
+    compose_tail_selected_count?: number;
+    compose_tail_skipped_count?: number;
+    floor_rescue_attempted?: boolean;
+    floor_rescue_applied?: boolean;
+    floor_rescue_source?: 'none' | 'sparse' | 'emergency' | 'final_fill';
+    floor_rescue_before_tracks?: number;
+    floor_rescue_after_tracks?: number;
   };
   curation?: {
     mode: PlaylistCurationMode;
@@ -3851,7 +3879,106 @@ type StudioFinalCompositionDiagnostics = {
   finalUniqueArtistCount: number;
   usedArtistCap3Fallback: boolean;
   fallbackReason: 'none' | 'unique_target_gap' | 'size_floor_gap';
+  tailQualityThresholdBase?: number;
+  tailQualityThresholdEffective?: number;
+  tailThresholdRelaxed?: boolean;
+  tailThresholdRelaxSteps?: number;
+  composeSkipReasonCounts?: Record<string, number>;
+  composeTailSelectedCount?: number;
+  composeTailSkippedCount?: number;
 };
+
+type StudioTailGuardDiagnostics = {
+  applied: boolean;
+  droppedCount: number;
+  skipReasonCounts: Record<string, number>;
+  topProtectedN: number;
+};
+
+type StudioFloorRescueDiagnostics = {
+  attempted: boolean;
+  applied: boolean;
+  source: 'none' | 'sparse' | 'emergency' | 'final_fill';
+  beforeTracks: number;
+  afterTracks: number;
+};
+
+function canonicalizeStudioArtistKey(artist: string): string {
+  return normalizeArtistIdentity(artist || '');
+}
+
+function canonicalizeStudioTrackKey(track: Track): string {
+  return `${canonicalizeStudioArtistKey(track.artist)}::${normalize(track.song || '')}`;
+}
+
+function captureTopTracksSnapshot(tracks: Track[], topN = 10): Array<{ artist: string; song: string }> {
+  return tracks.slice(0, Math.max(0, topN)).map((track) => ({ artist: track.artist, song: track.song }));
+}
+
+function countTopZoneChanges(before: Track[], after: Track[], protectedN = 8): number {
+  const beforeKeys = before
+    .slice(0, Math.max(0, protectedN))
+    .map((track) => canonicalizeStudioTrackKey(track));
+  const afterKeys = after
+    .slice(0, Math.max(0, protectedN))
+    .map((track) => canonicalizeStudioTrackKey(track));
+
+  const compareCount = Math.min(beforeKeys.length, afterKeys.length);
+  let changed = Math.abs(beforeKeys.length - afterKeys.length);
+  for (let index = 0; index < compareCount; index += 1) {
+    if (beforeKeys[index] !== afterKeys[index]) changed += 1;
+  }
+  return changed;
+}
+
+function dedupeStudioCandidatesEarly(tracks: Track[]): Track[] {
+  return tracks;
+}
+
+function computeStudioTailQualityScore(
+  _prompt: string,
+  _track: Track,
+  _index: number,
+  _tracks: Track[]
+): number {
+  return 0;
+}
+
+function applyStudioTailQualityGuard(
+  _prompt: string,
+  tracks: Track[]
+): { tracks: Track[]; diagnostics: StudioTailGuardDiagnostics } {
+  return {
+    tracks,
+    diagnostics: {
+      applied: false,
+      droppedCount: 0,
+      skipReasonCounts: {},
+      topProtectedN: 8,
+    },
+  };
+}
+
+async function attemptStudioFloorRescue(args: {
+  playlistTracks: Track[];
+  candidateTracks: Track[];
+  translatedPrompt: string;
+  constraint: PromptConstraint;
+  studioGeminiRecallArtists: string[];
+  creditEvidenceTracks: Array<{ artist: string; title: string }>;
+}): Promise<{ tracks: Track[]; diagnostics: StudioFloorRescueDiagnostics }> {
+  const beforeTracks = args.playlistTracks.length;
+  return {
+    tracks: args.playlistTracks,
+    diagnostics: {
+      attempted: beforeTracks < MIN_PLAYLIST_TRACKS,
+      applied: false,
+      source: 'none',
+      beforeTracks,
+      afterTracks: beforeTracks,
+    },
+  };
+}
 
 function composeStudioFinalSelection(
   tracks: Track[],
@@ -5539,8 +5666,39 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     verification.evidence_after = getCombinedCreditEvidenceCount((constraint.value || '').trim(), (constraint.creditRole || '').trim());
   }
 
+  let studioTop10BeforeEarlyDedupe: Array<{ artist: string; song: string }> = [];
+  let studioTop10AfterEarlyDedupe: Array<{ artist: string; song: string }> = [];
+  let studioTop10BeforeTailGuard: Array<{ artist: string; song: string }> = [];
+  let studioTop10AfterTailGuard: Array<{ artist: string; song: string }> = [];
+  let studioTop10BeforeCompose: Array<{ artist: string; song: string }> = [];
+  let studioTop10AfterCompose: Array<{ artist: string; song: string }> = [];
+  let studioEarlyDedupeInputCount = 0;
+  let studioEarlyDedupeOutputCount = 0;
+  const topZoneProtectedN = 8;
+  let topZoneChangeAfterTailGuard = 0;
+  let topZoneChangeAfterCompose = 0;
+  let topZoneRegressionFlag = false;
+  let studioTailGuardDiagnostics: StudioTailGuardDiagnostics = {
+    applied: false,
+    droppedCount: 0,
+    skipReasonCounts: {},
+    topProtectedN: topZoneProtectedN,
+  };
+  let studioFloorRescueDiagnostics: StudioFloorRescueDiagnostics = {
+    attempted: false,
+    applied: false,
+    source: 'none',
+    beforeTracks: 0,
+    afterTracks: 0,
+  };
+
   if (constraint?.kind === 'studio') {
     verifiedTracks = await applyStudioAlbumInferenceFallback(translatedPrompt, candidateTracks, verifiedTracks, constraint);
+    studioTop10BeforeEarlyDedupe = captureTopTracksSnapshot(verifiedTracks, 10);
+    studioEarlyDedupeInputCount = verifiedTracks.length;
+    verifiedTracks = dedupeStudioCandidatesEarly(verifiedTracks);
+    studioEarlyDedupeOutputCount = verifiedTracks.length;
+    studioTop10AfterEarlyDedupe = captureTopTracksSnapshot(verifiedTracks, 10);
   }
 
   playlist.tracks = constraint ? verifiedTracks : candidateTracks;
@@ -5560,12 +5718,24 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     playlist.tracks = applyStudioCuratedTrackWhitelist(constraint, playlist.tracks);
     playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, rankingStudioArtists);
     playlist.tracks = await applyStudioMainstreamRecognitionGate(translatedPrompt, playlist.tracks);
+    const studioBeforeTailGuardTracks = [...playlist.tracks];
+    studioTop10BeforeTailGuard = captureTopTracksSnapshot(studioBeforeTailGuardTracks, 10);
+    const studioTailGuardResult = applyStudioTailQualityGuard(translatedPrompt, playlist.tracks);
+    playlist.tracks = studioTailGuardResult.tracks;
+    studioTailGuardDiagnostics = studioTailGuardResult.diagnostics;
+    studioTop10AfterTailGuard = captureTopTracksSnapshot(playlist.tracks, 10);
+    topZoneChangeAfterTailGuard = countTopZoneChanges(studioBeforeTailGuardTracks, playlist.tracks, topZoneProtectedN);
     playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
     playlist.tracks = applyStudioArtistDiversity(playlist.tracks);
     playlist.tracks = enforceStudioClassicalRatio(translatedPrompt, playlist.tracks);
+    const studioBeforeComposeTracks = [...playlist.tracks];
+    studioTop10BeforeCompose = captureTopTracksSnapshot(studioBeforeComposeTracks, 10);
     const composedStudioSelection = composeStudioFinalSelection(playlist.tracks, MAX_PLAYLIST_TRACKS);
     playlist.tracks = composedStudioSelection.tracks;
     studioCompositionDiagnostics = composedStudioSelection.diagnostics;
+    studioTop10AfterCompose = captureTopTracksSnapshot(playlist.tracks, 10);
+    topZoneChangeAfterCompose = countTopZoneChanges(studioBeforeComposeTracks, playlist.tracks, topZoneProtectedN);
+    topZoneRegressionFlag = topZoneChangeAfterTailGuard >= 2 || topZoneChangeAfterCompose >= 2;
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
 
@@ -5597,6 +5767,34 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       final_unique_artist_count: studioCompositionDiagnostics?.finalUniqueArtistCount,
       used_artist_cap_3_fallback: studioCompositionDiagnostics?.usedArtistCap3Fallback,
       fallback_reason: studioCompositionDiagnostics?.fallbackReason,
+      top_zone_protected_n: topZoneProtectedN,
+      top_zone_change_count_after_tail_guard: topZoneChangeAfterTailGuard,
+      top_zone_change_count_after_compose: topZoneChangeAfterCompose,
+      top_zone_regression_flag: topZoneRegressionFlag,
+      snapshot_top10_before_early_dedupe: studioTop10BeforeEarlyDedupe,
+      snapshot_top10_after_early_dedupe: studioTop10AfterEarlyDedupe,
+      snapshot_top10_before_tail_guard: studioTop10BeforeTailGuard,
+      snapshot_top10_after_tail_guard: studioTop10AfterTailGuard,
+      snapshot_top10_before_compose: studioTop10BeforeCompose,
+      snapshot_top10_after_compose: studioTop10AfterCompose,
+      early_dedupe_input_tracks: studioEarlyDedupeInputCount,
+      early_dedupe_output_tracks: studioEarlyDedupeOutputCount,
+      early_dedupe_removed_tracks: Math.max(0, studioEarlyDedupeInputCount - studioEarlyDedupeOutputCount),
+      tail_guard_applied: studioTailGuardDiagnostics.applied,
+      tail_guard_dropped_count: studioTailGuardDiagnostics.droppedCount,
+      tail_guard_skip_reason_counts: studioTailGuardDiagnostics.skipReasonCounts,
+      tail_quality_threshold_base: studioCompositionDiagnostics?.tailQualityThresholdBase,
+      tail_quality_threshold_effective: studioCompositionDiagnostics?.tailQualityThresholdEffective,
+      tail_threshold_relaxed: studioCompositionDiagnostics?.tailThresholdRelaxed,
+      tail_threshold_relax_steps: studioCompositionDiagnostics?.tailThresholdRelaxSteps,
+      compose_skip_reason_counts: studioCompositionDiagnostics?.composeSkipReasonCounts,
+      compose_tail_selected_count: studioCompositionDiagnostics?.composeTailSelectedCount,
+      compose_tail_skipped_count: studioCompositionDiagnostics?.composeTailSkippedCount,
+      floor_rescue_attempted: studioFloorRescueDiagnostics.attempted,
+      floor_rescue_applied: studioFloorRescueDiagnostics.applied,
+      floor_rescue_source: studioFloorRescueDiagnostics.source,
+      floor_rescue_before_tracks: studioFloorRescueDiagnostics.beforeTracks,
+      floor_rescue_after_tracks: studioFloorRescueDiagnostics.afterTracks,
     };
   }
 
@@ -5609,6 +5807,19 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   }
   if (!constraint || constraint.kind !== 'credit') {
     playlist.tracks = refineGeneralTrackReasons(playlist.tracks);
+  }
+
+  if (constraint?.kind === 'studio' && playlist.tracks.length < MIN_PLAYLIST_TRACKS) {
+    const floorRescue = await attemptStudioFloorRescue({
+      playlistTracks: playlist.tracks,
+      candidateTracks,
+      translatedPrompt,
+      constraint,
+      studioGeminiRecallArtists,
+      creditEvidenceTracks,
+    });
+    playlist.tracks = floorRescue.tracks;
+    studioFloorRescueDiagnostics = floorRescue.diagnostics;
   }
 
   if (constraint?.kind === 'studio' && playlist.tracks.length < MIN_PLAYLIST_TRACKS) {

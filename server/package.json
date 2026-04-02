@@ -17,6 +17,8 @@
     "eval:routing:status": "tsx src/evaluation/routing-status.ts",
     "eval:studio-evidence": "tsx src/evaluation/studio-evidence.ts",
     "eval:studio-evidence:strict": "tsx src/evaluation/studio-evidence.ts --strict",
+    "eval:studio-cold-start": "tsx src/evaluation/studio-cold-start.ts",
+    "eval:studio-cold-start:strict": "tsx src/evaluation/studio-cold-start.ts --strict",
     "eval:studio-reference": "tsx src/evaluation/studio-reference.ts",
     "eval:studio-reference:strict": "tsx src/evaluation/studio-reference.ts --strict",
     "eval:credit-match": "tsx src/evaluation/credit-match.ts",

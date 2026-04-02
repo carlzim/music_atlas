@@ -66,8 +66,6 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
     musicBrainzPlaceIds: [
       '87e298cb-d108-4edf-ba51-5b96bdab33de',
     ],
-    activeStartYear: 1952,
-    activeEndYear: 1970,
     preferredArtists: [
       'Elvis Presley',
       'Johnny Cash',
@@ -99,7 +97,6 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
     musicBrainzPlaceIds: [
       '3b03d29f-61e2-471c-9652-3c0d5bb2bf38',
     ],
-    activeStartYear: 1961,
     preferredArtists: [
       'Aretha Franklin',
       'Wilson Pickett',
@@ -132,7 +129,6 @@ const STUDIO_IDENTITIES: StudioIdentity[] = [
     musicBrainzPlaceIds: [
       '80b7667e-5cd6-4037-b69e-a153c5417031',
     ],
-    activeStartYear: 1969,
     preferredArtists: [
       'The Rolling Stones',
       'Paul Simon',

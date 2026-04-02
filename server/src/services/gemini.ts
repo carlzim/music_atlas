@@ -3904,11 +3904,31 @@ type StudioFloorRescueDiagnostics = {
 };
 
 function canonicalizeStudioArtistKey(artist: string): string {
-  return normalizeArtistIdentity(artist || '');
+  const raw = String(artist || '').trim();
+  if (!raw) return '';
+  const normalized = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\((feat\.|featuring|with)[^)]+\)/g, ' ')
+    .replace(/\b(feat\.?|featuring|with|vs\.?)\b.*$/g, ' ')
+    .replace(/^the\s+/g, '')
+    .replace(/['’`]/g, '')
+    .replace(/[^a-z0-9&+ ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return normalizeArtistIdentity(normalized);
 }
 
 function canonicalizeStudioTrackKey(track: Track): string {
-  return `${canonicalizeStudioArtistKey(track.artist)}::${normalize(track.song || '')}`;
+  const artistKey = canonicalizeStudioArtistKey(track.artist);
+  const songKey = normalize(track.song || '')
+    .replace(/\((feat\.|featuring|with)[^)]+\)/g, ' ')
+    .replace(/\b(remaster(?:ed)?|live|demo|alternate take|alt take|mono mix|stereo mix)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return `${artistKey}::${songKey}`;
 }
 
 function captureTopTracksSnapshot(tracks: Track[], topN = 10): Array<{ artist: string; song: string }> {
@@ -3932,29 +3952,119 @@ function countTopZoneChanges(before: Track[], after: Track[], protectedN = 8): n
 }
 
 function dedupeStudioCandidatesEarly(tracks: Track[]): Track[] {
-  return tracks;
+  if (tracks.length <= 1) return tracks;
+  const chosenByKey = new Map<string, Track>();
+  const scoreTrack = (track: Track): number => {
+    const variantPenalty = getStudioTrackVariantPenalty(track.song);
+    const commercialPenalty = getStudioTrackCommercialPenalty(track.artist, track.song);
+    const hasSpotify = track.spotify_url ? 2 : 0;
+    const hasAlbumImage = track.album_image_url ? 1 : 0;
+    const hasYear = typeof track.release_year === 'number' ? 1 : 0;
+    return hasSpotify + hasAlbumImage + hasYear - variantPenalty - commercialPenalty;
+  };
+
+  for (const track of tracks) {
+    const key = canonicalizeStudioTrackKey(track);
+    if (!key || key === '::') continue;
+    const existing = chosenByKey.get(key);
+    if (!existing) {
+      chosenByKey.set(key, track);
+      continue;
+    }
+
+    const existingScore = scoreTrack(existing);
+    const incomingScore = scoreTrack(track);
+    if (incomingScore > existingScore) {
+      chosenByKey.set(key, track);
+      continue;
+    }
+    if (incomingScore === existingScore) {
+      const existingArtistLength = (existing.artist || '').length;
+      const incomingArtistLength = (track.artist || '').length;
+      if (incomingArtistLength < existingArtistLength) {
+        chosenByKey.set(key, track);
+      }
+    }
+  }
+
+  const chosenKeys = new Set(chosenByKey.keys());
+  const ordered: Track[] = [];
+  const seen = new Set<string>();
+  for (const track of tracks) {
+    const key = canonicalizeStudioTrackKey(track);
+    if (!key || !chosenKeys.has(key) || seen.has(key)) continue;
+    const kept = chosenByKey.get(key);
+    if (kept) ordered.push(kept);
+    seen.add(key);
+  }
+  return ordered.length > 0 ? ordered : tracks;
 }
 
 function computeStudioTailQualityScore(
   _prompt: string,
-  _track: Track,
+  track: Track,
   _index: number,
   _tracks: Track[]
 ): number {
-  return 0;
+  const variantPenalty = getStudioTrackVariantPenalty(track.song);
+  const commercialPenalty = getStudioTrackCommercialPenalty(track.artist, track.song);
+  const classicalPenalty = isLikelyClassicalOrScoreTrack(track.artist, track.song) ? 4 : 0;
+  const hasSpotify = track.spotify_url ? 2 : 0;
+  const hasAlbumImage = track.album_image_url ? 1 : 0;
+  const hasYear = typeof track.release_year === 'number' ? 1 : 0;
+  return hasSpotify + hasAlbumImage + hasYear - variantPenalty - commercialPenalty - classicalPenalty;
 }
 
 function applyStudioTailQualityGuard(
-  _prompt: string,
+  prompt: string,
   tracks: Track[]
 ): { tracks: Track[]; diagnostics: StudioTailGuardDiagnostics } {
+  if (tracks.length <= 1) {
+    return {
+      tracks,
+      diagnostics: {
+        applied: false,
+        droppedCount: 0,
+        skipReasonCounts: {},
+        topProtectedN: 8,
+      },
+    };
+  }
+
+  const topProtectedN = 8;
+  const skipReasonCounts: Record<string, number> = {};
+  const threshold = /\bbest\b|\biconic\b|\bfamous\b|\bclassic\b|\bgreatest\b/i.test(prompt)
+    ? -7
+    : -9;
+  const guarded: Track[] = [];
+
+  for (let index = 0; index < tracks.length; index += 1) {
+    const track = tracks[index];
+    if (!track) continue;
+    if (index < topProtectedN) {
+      guarded.push(track);
+      continue;
+    }
+
+    const tailScore = computeStudioTailQualityScore(prompt, track, index, tracks);
+    const remainingIfSkipped = tracks.length - (index + 1);
+    const guaranteedCount = guarded.length + remainingIfSkipped;
+    const canSkip = guaranteedCount >= MIN_PLAYLIST_TRACKS;
+    if (tailScore < threshold && canSkip) {
+      skipReasonCounts.low_tail_quality = (skipReasonCounts.low_tail_quality || 0) + 1;
+      continue;
+    }
+    guarded.push(track);
+  }
+
+  const droppedCount = Math.max(0, tracks.length - guarded.length);
   return {
-    tracks,
+    tracks: guarded,
     diagnostics: {
-      applied: false,
-      droppedCount: 0,
-      skipReasonCounts: {},
-      topProtectedN: 8,
+      applied: droppedCount > 0,
+      droppedCount,
+      skipReasonCounts,
+      topProtectedN,
     },
   };
 }

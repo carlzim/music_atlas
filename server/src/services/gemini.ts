@@ -3,7 +3,7 @@ import { canonicalizeEquipmentName, getAtlasEntityCatalog, getAssociatedArtistsB
 import { backfillCreditFromMusicBrainz, SUPPORTED_MUSICBRAINZ_CREDIT_ROLES } from './evidence-backfill.js';
 import { backfillStudioFromDiscogs } from './evidence-backfill-studio.js';
 import { buildArtistCanonicalKey, buildCreditCanonicalKey, buildPersonCanonicalKey, buildStudioCanonicalKey, canonicalizeDisplayName } from './normalize.js';
-import { searchTrackWithDiagnostics } from './spotify.js';
+import { searchTrackCandidates, searchTrackWithDiagnostics } from './spotify.js';
 import { syncTruthMembershipForBandName } from './truth-layer.js';
 import { backfillTruthCreditsFromDiscogs, getTruthCreditCandidates, SUPPORTED_TRUTH_CREDIT_ROLES } from './truth-credit-layer.js';
 import { resolvePromptRoute } from './prompt-routing.js';
@@ -1951,6 +1951,39 @@ function getStudioTrackCommercialPenalty(artistName: string, songTitle: string):
   return penalty;
 }
 
+function normalizeStudioSongTitleKey(songTitle: string): string {
+  return normalize(songTitle || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\b(?:mono|stereo)\s+mix\b/g, ' ')
+    .replace(/\b(?:radio\s+edit|edit|version|mix|remix|rework|extended|instrumental|karaoke|live|demo|outtake|alternate|alt\.?\s*take|session\s+version|backing\s+track)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isCompilationLikeAlbumTitle(albumTitle: string): boolean {
+  const value = normalize(albumTitle || '');
+  if (!value) return false;
+  return /\b(?:greatest\s+hits|best\s+of|anthology|collection|compilation|essentials|gold|platinum|singles\s+collection|complete\s+recordings)\b/.test(value);
+}
+
+function getStudioArtistDensityByConstraint(constraint: PromptConstraint, limit = 500): Map<string, number> {
+  if (constraint.kind !== 'studio') return new Map<string, number>();
+  const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+    ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+    : [(constraint.value || '').trim()].filter(Boolean);
+  const density = new Map<string, number>();
+  for (const studio of acceptedStudios) {
+    const rows = getTracksByRecordingStudioEvidence(studio, limit, true);
+    for (const row of rows) {
+      const artistKey = canonicalizeStudioArtistKey(row.artist);
+      if (!artistKey) continue;
+      density.set(artistKey, (density.get(artistKey) || 0) + 1);
+    }
+  }
+  return density;
+}
+
 function buildDiverseDiagnosticsTrackWindow(tracks: Track[], limit: number): Track[] {
   if (tracks.length <= 1 || limit <= 1) return tracks.slice(0, Math.max(0, limit));
   const target = Math.min(limit, tracks.length);
@@ -1961,9 +1994,9 @@ function buildDiverseDiagnosticsTrackWindow(tracks: Track[], limit: number): Tra
   const addPass = (artistCap: number): void => {
     for (const track of tracks) {
       if (selected.length >= target) break;
-      const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+      const key = canonicalizeStudioTrackKey(track);
       if (!key || selectedKeys.has(key)) continue;
-      const artistKey = normalizeArtistIdentity(track.artist);
+      const artistKey = canonicalizeStudioArtistKey(track.artist);
       if (!artistKey) continue;
       const count = artistCounts.get(artistKey) || 0;
       if (count >= artistCap) continue;
@@ -1979,7 +2012,7 @@ function buildDiverseDiagnosticsTrackWindow(tracks: Track[], limit: number): Tra
   if (selected.length < target) {
     for (const track of tracks) {
       if (selected.length >= target) break;
-      const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
+      const key = canonicalizeStudioTrackKey(track);
       if (!key || selectedKeys.has(key)) continue;
       selected.push(track);
       selectedKeys.add(key);
@@ -1992,7 +2025,8 @@ function buildDiverseDiagnosticsTrackWindow(tracks: Track[], limit: number): Tra
 async function rankStudioTracksByRecognition(
   _prompt: string,
   tracks: Track[],
-  preferredArtists: Set<string>
+  preferredArtists: Set<string>,
+  constraint: PromptConstraint | null = null
 ): Promise<Track[]> {
   if (tracks.length <= 1) return tracks;
 
@@ -2001,6 +2035,18 @@ async function rankStudioTracksByRecognition(
   const preferredArtistKeys = Array.from(preferredArtists)
     .map((value) => normalizeArtistIdentity(value))
     .filter((value) => value.length > 0);
+  const artistDensity = constraint && constraint.kind === 'studio'
+    ? getStudioArtistDensityByConstraint(constraint, 500)
+    : new Map<string, number>();
+  const maxDensity = artistDensity.size > 0
+    ? Math.max(...Array.from(artistDensity.values()))
+    : 0;
+  const eraStart = constraint?.kind === 'studio' && typeof constraint.studioActiveStartYear === 'number'
+    ? constraint.studioActiveStartYear
+    : null;
+  const eraEnd = constraint?.kind === 'studio' && typeof constraint.studioActiveEndYear === 'number'
+    ? constraint.studioActiveEndYear
+    : null;
 
   const scored = tracks.map((track, index) => {
     const variantPenalty = getStudioTrackVariantPenalty(track.song);
@@ -2013,11 +2059,20 @@ async function rankStudioTracksByRecognition(
       ? Math.floor(track.release_year)
       : null;
     const yearBoost = releaseYear !== null && releaseYear >= 1955 && releaseYear <= 1999 ? 1 : 0;
+    const eraFitBoost = releaseYear !== null && eraStart !== null && eraEnd !== null
+      ? (releaseYear >= eraStart && releaseYear <= eraEnd ? 4 : -2)
+      : 0;
+    const artistKey = canonicalizeStudioArtistKey(track.artist);
+    const artistDensityCount = artistKey ? (artistDensity.get(artistKey) || 0) : 0;
+    const densityBoost = maxDensity > 0
+      ? Math.min(8, Math.round((artistDensityCount / maxDensity) * 8))
+      : 0;
+    const coreBoost = matchesPreferredArtist ? 3 : 0;
     const classicalPenalty = !wantsClassicalMusic && isLikelyClassicalOrScoreTrack(track.artist, track.song) ? 16 : 0;
     const mainstreamPenalty = mainstreamPrompt && preferredArtistKeys.length > 0 && !matchesPreferredArtist
       ? 2
       : 0;
-    const finalScore = preferredArtistBoost + yearBoost - variantPenalty - commercialPenalty - mainstreamPenalty - classicalPenalty;
+    const finalScore = preferredArtistBoost + coreBoost + densityBoost + eraFitBoost + yearBoost - variantPenalty - commercialPenalty - mainstreamPenalty - classicalPenalty;
     return { track, index, finalScore, recognitionScore: 0 };
   });
 
@@ -2048,8 +2103,8 @@ async function rankStudioTracksByRecognition(
       .slice(0, Math.min(scored.length, Math.max(lookupCap * 2, 24)));
 
     const preRankedLookupTracks = buildDiverseDiagnosticsTrackWindow(preRankedForLookup.map((row) => row.track), lookupCap);
-    const allowedLookupKeys = new Set(preRankedLookupTracks.map((track) => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
-    const preRankedForLookupDiverse = preRankedForLookup.filter((item) => allowedLookupKeys.has(`${normalizeArtistIdentity(item.track.artist)}::${normalize(item.track.song)}`));
+    const allowedLookupKeys = new Set(preRankedLookupTracks.map((track) => canonicalizeStudioTrackKey(track)));
+    const preRankedForLookupDiverse = preRankedForLookup.filter((item) => allowedLookupKeys.has(canonicalizeStudioTrackKey(item.track)));
 
     await Promise.all(preRankedForLookupDiverse.map(async (item) => {
       const info = await withTimeout(
@@ -2158,9 +2213,9 @@ async function applyStudioMainstreamRecognitionGate(prompt: string, tracks: Trac
     const picked: Array<{ track: Track; index: number; recognition: number; popularity: number }> = [];
     for (const row of rows) {
       if (picked.length >= limit) break;
-      const trackKey = `${normalizeArtistIdentity(row.track.artist)}::${normalize(row.track.song)}`;
+      const trackKey = canonicalizeStudioTrackKey(row.track);
       if (!trackKey || usedKeys.has(trackKey)) continue;
-      const artistKey = normalizeArtistIdentity(row.track.artist);
+      const artistKey = canonicalizeStudioArtistKey(row.track.artist);
       if (!artistKey) continue;
       const count = artistCounts.get(artistKey) || 0;
       if (count >= artistCap) continue;
@@ -2187,8 +2242,8 @@ async function applyStudioMainstreamRecognitionGate(prompt: string, tracks: Trac
   if (prioritized.length === 0) return tracks;
 
   const prioritizedTracks = prioritized.map((row) => row.track);
-  const prioritizedTrackKeys = new Set(prioritizedTracks.map((row) => `${normalizeArtistIdentity(row.artist)}::${normalize(row.song)}`));
-  const remainder = tracks.filter((track) => !prioritizedTrackKeys.has(`${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
+  const prioritizedTrackKeys = new Set(prioritizedTracks.map((row) => canonicalizeStudioTrackKey(row)));
+  const remainder = tracks.filter((track) => !prioritizedTrackKeys.has(canonicalizeStudioTrackKey(track)));
   return [...prioritizedTracks, ...remainder];
 }
 
@@ -2384,6 +2439,52 @@ async function sortTracksChronologicallyIfNeeded(prompt: string, tracks: Track[]
   });
 
   return withMeta.map(({ __index, ...track }) => track);
+}
+
+async function applyStudioReleaseSelectionPreference(prompt: string, tracks: Track[]): Promise<Track[]> {
+  if (tracks.length === 0) return tracks;
+
+  return await Promise.all(tracks.map(async (track) => {
+    try {
+      const diagnostics = await searchTrackWithDiagnostics(track.artist, track.song, prompt);
+      const matchedAlbumTitle = typeof diagnostics.matchedAlbumTitle === 'string'
+        ? diagnostics.matchedAlbumTitle.trim()
+        : '';
+      const existingAlbumTitle = typeof track.album_title === 'string' ? track.album_title.trim() : '';
+      const existingIsCompilation = isCompilationLikeAlbumTitle(existingAlbumTitle);
+      const diagnosticsIsCompilation = isCompilationLikeAlbumTitle(matchedAlbumTitle);
+
+      let albumTitle = existingAlbumTitle;
+      if (!existingAlbumTitle && matchedAlbumTitle) {
+        albumTitle = matchedAlbumTitle;
+      } else if (existingAlbumTitle && !existingIsCompilation && diagnosticsIsCompilation) {
+        albumTitle = existingAlbumTitle;
+      } else if (matchedAlbumTitle && !diagnosticsIsCompilation) {
+        albumTitle = matchedAlbumTitle;
+      }
+
+      let spotifyUrl = track.spotify_url || diagnostics.spotify_url || null;
+      if (!spotifyUrl) {
+        const candidates = await searchTrackCandidates(track.artist, track.song, prompt, 5);
+        const canonicalCandidate = candidates.find((candidate) => !candidate.live_variant && !candidate.remix_variant)
+          || candidates[0]
+          || null;
+        if (canonicalCandidate?.spotify_url) {
+          spotifyUrl = canonicalCandidate.spotify_url;
+        }
+      }
+
+      return {
+        ...track,
+        spotify_url: spotifyUrl,
+        album_image_url: track.album_image_url || diagnostics.album_image_url || null,
+        album_title: albumTitle || null,
+        release_year: typeof track.release_year === 'number' ? track.release_year : diagnostics.release_year,
+      };
+    } catch {
+      return track;
+    }
+  }));
 }
 
 function normalizeTagForComparison(tag: string): string {
@@ -3869,6 +3970,10 @@ function canonicalizeStudioArtistKey(artist: string): string {
     .toLowerCase()
     .replace(/\((feat\.|featuring|with)[^)]+\)/g, ' ')
     .replace(/\b(feat\.?|featuring|with|vs\.?)\b.*$/g, ' ')
+    .replace(/\s+(?:&|and)\s+the\s+[^,]+$/g, ' ')
+    .replace(/\s*&\s+the\s+[^,]+$/g, ' ')
+    .replace(/\s+and\s+the\s+[^,]+$/g, ' ')
+    .replace(/\s+with\s+[^,]+$/g, ' ')
     .replace(/^the\s+/g, '')
     .replace(/['’`]/g, '')
     .replace(/[^a-z0-9&+ ]+/g, ' ')
@@ -3880,11 +3985,7 @@ function canonicalizeStudioArtistKey(artist: string): string {
 
 function canonicalizeStudioTrackKey(track: Track): string {
   const artistKey = canonicalizeStudioArtistKey(track.artist);
-  const songKey = normalize(track.song || '')
-    .replace(/\((feat\.|featuring|with)[^)]+\)/g, ' ')
-    .replace(/\b(remaster(?:ed)?|live|demo|alternate take|alt take|mono mix|stereo mix)\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const songKey = normalizeStudioSongTitleKey(track.song || '');
   return `${artistKey}::${songKey}`;
 }
 
@@ -3974,7 +4075,8 @@ function computeStudioTailQualityScore(
 
 function applyStudioTailQualityGuard(
   prompt: string,
-  tracks: Track[]
+  tracks: Track[],
+  constraint: PromptConstraint | null = null
 ): { tracks: Track[]; diagnostics: StudioTailGuardDiagnostics } {
   if (tracks.length <= 1) {
     return {
@@ -3991,8 +4093,11 @@ function applyStudioTailQualityGuard(
   const topProtectedN = 8;
   const skipReasonCounts: Record<string, number> = {};
   const threshold = /\bbest\b|\biconic\b|\bfamous\b|\bclassic\b|\bgreatest\b/i.test(prompt)
-    ? -7
-    : -9;
+    ? -4
+    : -6;
+  const artistDensity = constraint && constraint.kind === 'studio'
+    ? getStudioArtistDensityByConstraint(constraint, 500)
+    : new Map<string, number>();
   const guarded: Track[] = [];
 
   for (let index = 0; index < tracks.length; index += 1) {
@@ -4004,10 +4109,12 @@ function applyStudioTailQualityGuard(
     }
 
     const tailScore = computeStudioTailQualityScore(prompt, track, index, tracks);
+    const density = artistDensity.get(canonicalizeStudioArtistKey(track.artist)) || 0;
+    const densityAdjustedScore = tailScore + Math.min(3, density > 0 ? Math.log2(density + 1) : 0);
     const remainingIfSkipped = tracks.length - (index + 1);
     const guaranteedCount = guarded.length + remainingIfSkipped;
     const canSkip = guaranteedCount >= MIN_PLAYLIST_TRACKS;
-    if (tailScore < threshold && canSkip) {
+    if (densityAdjustedScore < threshold && canSkip) {
       skipReasonCounts.low_tail_quality = (skipReasonCounts.low_tail_quality || 0) + 1;
       continue;
     }
@@ -4088,9 +4195,9 @@ async function attemptStudioFloorRescue(args: {
   rescueTracks = applyStudioIdentityYearBounds(args.constraint, rescueTracks);
   rescueTracks = rescueTracks.filter((track) => !isDisallowedStrictStudioVersionTitle(track.song));
   rescueTracks = enforceStudioClassicalRatio(args.translatedPrompt, rescueTracks);
-  rescueTracks = await rankStudioTracksByRecognition(args.translatedPrompt, rescueTracks, rescueRankingStudioArtists);
+  rescueTracks = await rankStudioTracksByRecognition(args.translatedPrompt, rescueTracks, rescueRankingStudioArtists, args.constraint);
   rescueTracks = await applyStudioMainstreamRecognitionGate(args.translatedPrompt, rescueTracks);
-  rescueTracks = applyStudioTailQualityGuard(args.translatedPrompt, rescueTracks).tracks;
+  rescueTracks = applyStudioTailQualityGuard(args.translatedPrompt, rescueTracks, args.constraint).tracks;
   const composed = composeStudioFinalSelection(rescueTracks, MAX_PLAYLIST_TRACKS);
 
   if (composed.tracks.length >= MIN_PLAYLIST_TRACKS) {
@@ -4180,6 +4287,18 @@ function composeStudioFinalSelection(
   let tailThresholdRelaxed = false;
   let composeTailSelectedCount = 0;
   let composeTailSkippedCount = 0;
+
+  const frozenTopZoneCount = Math.min(8, desiredCount, tracks.length);
+  for (const frozenTrack of tracks.slice(0, frozenTopZoneCount)) {
+    const key = canonicalizeStudioTrackKey(frozenTrack);
+    if (!key || selectedTrackKeys.has(key)) continue;
+    selected.push(frozenTrack);
+    selectedTrackKeys.add(key);
+    const artistKey = canonicalizeStudioArtistKey(frozenTrack.artist);
+    if (artistKey) {
+      artistCounts.set(artistKey, (artistCounts.get(artistKey) || 0) + 1);
+    }
+  }
 
   const trackKey = (track: Track): string => canonicalizeStudioTrackKey(track);
   const isTrackTailCandidate = (track: Track): boolean => {
@@ -5917,16 +6036,33 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     const preferredStudioArtists = new Set((constraint.studioPreferredArtists || []).map((value) => normalize(value)).filter(Boolean));
     const recallStudioArtists = new Set(studioGeminiRecallArtists.map((value) => normalize(value)).filter(Boolean));
     const rankingStudioArtists = new Set<string>([...preferredStudioArtists, ...recallStudioArtists]);
+    const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
+      ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
+      : [(constraint.value || '').trim()].filter(Boolean);
+    if (acceptedStudios.length > 0) {
+      const fullTrustedPool = acceptedStudios
+        .flatMap((studio) => getTracksByRecordingStudioEvidence(studio, STUDIO_CANDIDATE_POOL_MAX, true))
+        .map((row) => ({
+          artist: row.artist,
+          song: row.title,
+          reason: `Verified recording studio evidence for ${(constraint.value || '').trim()}`,
+        }));
+      if (fullTrustedPool.length > 0) {
+        const mergedTrusted = dedupeTracks([...playlist.tracks, ...fullTrustedPool]);
+        playlist.tracks = filterTracksByConstraint(mergedTrusted, constraint, translatedPrompt, creditEvidenceTracks);
+        playlist.tracks = dedupeStudioCandidatesEarly(playlist.tracks);
+      }
+    }
     playlist.tracks = await applyRequestedDecadeFilter(translatedPrompt, playlist.tracks);
     playlist.tracks = applyStudioIdentityYearBounds(constraint, playlist.tracks);
     playlist.tracks = applyStudioClassicalPolicy(translatedPrompt, playlist.tracks);
     playlist.tracks = await rerankStudioTracksWithGemini(translatedPrompt, playlist.tracks);
     playlist.tracks = applyStudioCuratedTrackWhitelist(constraint, playlist.tracks);
-    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, rankingStudioArtists);
+    playlist.tracks = await rankStudioTracksByRecognition(translatedPrompt, playlist.tracks, rankingStudioArtists, constraint);
     playlist.tracks = await applyStudioMainstreamRecognitionGate(translatedPrompt, playlist.tracks);
     const studioBeforeTailGuardTracks = [...playlist.tracks];
     studioTop10BeforeTailGuard = captureTopTracksSnapshot(studioBeforeTailGuardTracks, 10);
-    const studioTailGuardResult = applyStudioTailQualityGuard(translatedPrompt, playlist.tracks);
+    const studioTailGuardResult = applyStudioTailQualityGuard(translatedPrompt, playlist.tracks, constraint);
     playlist.tracks = studioTailGuardResult.tracks;
     studioTailGuardDiagnostics = studioTailGuardResult.diagnostics;
     studioTop10AfterTailGuard = captureTopTracksSnapshot(playlist.tracks, 10);
@@ -5942,6 +6078,11 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     studioTop10AfterCompose = captureTopTracksSnapshot(playlist.tracks, 10);
     topZoneChangeAfterCompose = countTopZoneChanges(studioBeforeComposeTracks, playlist.tracks, topZoneProtectedN);
     topZoneRegressionFlag = topZoneChangeAfterTailGuard >= 2 || topZoneChangeAfterCompose >= 2;
+    if (topZoneRegressionFlag) {
+      playlist.tracks = studioBeforeComposeTracks;
+      studioTop10AfterCompose = captureTopTracksSnapshot(playlist.tracks, 10);
+      topZoneChangeAfterCompose = 0;
+    }
   }
   const studioVerifiedAfterDecadeFilter = constraint?.kind === 'studio' ? playlist.tracks.length : null;
 
@@ -6080,6 +6221,10 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     } else {
       throw new Error(`Only ${playlist.tracks.length} tracks were generated. At least ${MIN_PLAYLIST_TRACKS} are required.`);
     }
+  }
+
+  if (constraint?.kind === 'studio') {
+    playlist.tracks = await applyStudioReleaseSelectionPreference(translatedPrompt, playlist.tracks);
   }
 
   // Store with translated prompt

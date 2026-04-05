@@ -140,6 +140,10 @@ interface TruthDetails {
     floor_rescue_source?: 'none' | 'sparse' | 'emergency' | 'final_fill';
     floor_rescue_before_tracks?: number;
     floor_rescue_after_tracks?: number;
+    dropped_due_to_successor_match?: number;
+    dropped_due_to_strict_version_filter?: number;
+    dropped_due_to_untrusted_studio_evidence?: number;
+    rescue_pool_verified_track_count?: number;
   };
   curation?: {
     mode: PlaylistCurationMode;
@@ -1619,6 +1623,9 @@ function summarizeStudioConstraintDiagnostics(
 ): {
   acceptedEvidenceMatches: number;
   excludedSuccessorMatches: number;
+  droppedDueToSuccessorMatch: number;
+  droppedDueToStrictVersionFilter: number;
+  droppedDueToUntrustedStudioEvidence: number;
 } {
   const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
     ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
@@ -1629,17 +1636,44 @@ function summarizeStudioConstraintDiagnostics(
 
   let acceptedEvidenceMatches = 0;
   let excludedSuccessorMatches = 0;
+  let droppedDueToSuccessorMatch = 0;
+  let droppedDueToStrictVersionFilter = 0;
+  let droppedDueToUntrustedStudioEvidence = 0;
 
   for (const track of tracks) {
     const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
-    if (!acceptedMatch) continue;
+    if (!acceptedMatch) {
+      const untrustedOnlyMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, false));
+      if (untrustedOnlyMatch) droppedDueToUntrustedStudioEvidence += 1;
+      continue;
+    }
     acceptedEvidenceMatches += 1;
 
     const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
-    if (successorMatch) excludedSuccessorMatches += 1;
+    if (successorMatch) {
+      excludedSuccessorMatches += 1;
+      droppedDueToSuccessorMatch += 1;
+      continue;
+    }
+
+    if (isDisallowedStrictStudioVersionTitle(track.song)) {
+      droppedDueToStrictVersionFilter += 1;
+    }
   }
 
-  return { acceptedEvidenceMatches, excludedSuccessorMatches };
+  return {
+    acceptedEvidenceMatches,
+    excludedSuccessorMatches,
+    droppedDueToSuccessorMatch,
+    droppedDueToStrictVersionFilter,
+    droppedDueToUntrustedStudioEvidence,
+  };
+}
+
+function isDisallowedStrictStudioVersionTitle(songTitle: string): boolean {
+  const title = normalize(songTitle || '');
+  if (!title) return false;
+  return /\b(?:live|demo|outtake|alternate|alt\.?\s*take|instrumental|karaoke|remix|radio\s+edit|edit|rework|re-record(?:ed|ing)?|session\s+version|backing\s+track)\b/.test(title);
 }
 
 function hasStudioIntent(prompt: string): boolean {
@@ -2699,6 +2733,10 @@ function filterTracksByConstraint(
     const acceptedMatches = tracks.filter((track) => {
       const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
       if (!acceptedMatch) {
+        const untrustedOnlyMatch = acceptedStudios.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, false));
+        if (untrustedOnlyMatch) {
+          console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="dropped_due_to_untrusted_studio_evidence"`);
+        }
         console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="no recording-level studio evidence for requested studio era"`);
         return false;
       }
@@ -2709,6 +2747,7 @@ function filterTracksByConstraint(
     const successorFiltered = acceptedMatches.filter((track) => {
       const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioEvidence(track.artist, track.song, studioName, true));
       if (successorMatch) {
+        console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="dropped_due_to_successor_match"`);
         console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="matched excluded successor studio identity"`);
         return false;
       }
@@ -2716,16 +2755,15 @@ function filterTracksByConstraint(
       return true;
     });
 
-    if (successorFiltered.length >= MIN_PLAYLIST_TRACKS) {
-      return successorFiltered;
-    }
+    const strictVersionFiltered = successorFiltered.filter((track) => {
+      const drop = isDisallowedStrictStudioVersionTitle(track.song);
+      if (drop) {
+        console.log(`[verification] dropped track "${track.song} - ${track.artist}" reason="dropped_due_to_strict_version_filter"`);
+      }
+      return !drop;
+    });
 
-    if (acceptedMatches.length >= MIN_PLAYLIST_TRACKS && successorFiltered.length < MIN_PLAYLIST_TRACKS) {
-      console.log(`[verification] successor exclusion fallback activated accepted=${acceptedMatches.length} filtered=${successorFiltered.length} minimum=${MIN_PLAYLIST_TRACKS}`);
-      return acceptedMatches;
-    }
-
-    return successorFiltered;
+    return strictVersionFiltered;
   }
 
   if (constraint.kind === 'venue') {
@@ -2865,96 +2903,14 @@ function filterTracksByStudioAcceptedEvidenceOnly(tracks: Track[], constraint: P
 }
 
 async function applyStudioAlbumInferenceFallback(
-  prompt: string,
-  candidateTracks: Track[],
+  _prompt: string,
+  _candidateTracks: Track[],
   verifiedTracks: Track[],
   constraint: PromptConstraint | null
 ): Promise<Track[]> {
   if (!constraint || constraint.kind !== 'studio') return verifiedTracks;
-  if (promptWantsClassicalMusic(prompt)) return verifiedTracks;
-  const mainstreamStudioPrompt = isMainstreamStudioPrompt(prompt);
-
-  const acceptedStudios = Array.isArray(constraint.studioAcceptedNames) && constraint.studioAcceptedNames.length > 0
-    ? Array.from(new Set(constraint.studioAcceptedNames.map((value) => value.trim()).filter(Boolean)))
-    : [(constraint.value || '').trim()].filter(Boolean);
-  const excludedSuccessors = Array.isArray(constraint.studioExcludedSuccessorNames)
-    ? Array.from(new Set(constraint.studioExcludedSuccessorNames.map((value) => value.trim()).filter(Boolean)))
-    : [];
-  if (acceptedStudios.length === 0) return verifiedTracks;
-
-  const verifiedKeys = new Set(verifiedTracks.map((track) => `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`));
-  const verifiedArtistKeys = new Set(verifiedTracks.map((track) => normalizeArtistIdentity(track.artist)).filter((key) => key.length > 0));
-  const inferredPerArtist = new Map<string, number>();
-  const additions: Track[] = [];
-  const lookupCandidates = candidateTracks.filter((track) => {
-    const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
-    return key.length > 4 && !verifiedKeys.has(key);
-  }).slice(0, STUDIO_CANDIDATE_POOL_MAX);
-
-  const diagnosticsLookupCap = verifiedTracks.length < MIN_PLAYLIST_TRACKS
-    ? Math.min(lookupCandidates.length, Math.max(STUDIO_DIAGNOSTICS_CAP, 220))
-    : STUDIO_DIAGNOSTICS_CAP;
-
-  for (let candidateIndex = 0; candidateIndex < lookupCandidates.length; candidateIndex += 1) {
-    const track = lookupCandidates[candidateIndex];
-    if (!track) continue;
-    const key = `${normalizeArtistIdentity(track.artist)}::${normalize(track.song)}`;
-    if (!key || verifiedKeys.has(key)) continue;
-
-    let albumTitle = typeof track.album_title === 'string' ? track.album_title.trim() : '';
-    let popularity = 0;
-    let recognition = 0;
-    if (candidateIndex < diagnosticsLookupCap) {
-      try {
-        const info = await runWithTimeout(
-          () => searchTrackWithDiagnostics(track.artist, track.song, prompt),
-          1200,
-          'studio_album_lookup_timeout'
-        );
-        albumTitle = albumTitle || (typeof info.matchedAlbumTitle === 'string' ? info.matchedAlbumTitle.trim() : '');
-        if (albumTitle && !track.album_title) track.album_title = albumTitle;
-        if (!track.spotify_url && info.spotify_url) track.spotify_url = info.spotify_url;
-        popularity = typeof info.popularity === 'number' && Number.isFinite(info.popularity) ? info.popularity : 0;
-        recognition = typeof info.score === 'number' && Number.isFinite(info.score) ? info.score : 0;
-      } catch {
-        // Keep fallback behavior; unresolved metadata simply won't pass strict gates below.
-      }
-    }
-
-    if (mainstreamStudioPrompt) {
-      if (popularity < 45 && !(popularity >= 36 && recognition >= 7)) continue;
-    } else {
-      if (popularity < 32 && !(popularity >= 26 && recognition >= 6)) continue;
-    }
-    if (!albumTitle) continue;
-
-    const acceptedMatch = acceptedStudios.some((studioName) => hasRecordingStudioAlbumEvidence(track.artist, albumTitle, studioName, true));
-    if (!acceptedMatch) continue;
-
-    const successorMatch = excludedSuccessors.some((studioName) => hasRecordingStudioAlbumEvidence(track.artist, albumTitle, studioName, true));
-    if (successorMatch) continue;
-
-    const artistKey = normalizeArtistIdentity(track.artist);
-    if (!artistKey) continue;
-    const existingPerArtist = inferredPerArtist.get(artistKey) || 0;
-    const perArtistCap = verifiedTracks.length < MIN_PLAYLIST_TRACKS ? 2 : 1;
-    if (existingPerArtist >= perArtistCap) continue;
-
-    const needsMinimumSize = verifiedTracks.length + additions.length < MIN_PLAYLIST_TRACKS;
-    const needsBreadth = !needsMinimumSize && verifiedArtistKeys.size + additions.length < 12;
-    if (needsBreadth && verifiedArtistKeys.has(artistKey)) continue;
-
-    additions.push({
-      ...track,
-      reason: `${track.reason} (album-level studio evidence)`
-    });
-    verifiedKeys.add(key);
-    verifiedArtistKeys.add(artistKey);
-    inferredPerArtist.set(artistKey, existingPerArtist + 1);
-  }
-
-  if (additions.length === 0) return verifiedTracks;
-  return dedupeTracks([...verifiedTracks, ...additions]);
+  // Studio strict mode: disallow album-level inferred additions.
+  return verifiedTracks;
 }
 
 function dedupeTracks(tracks: Track[]): Track[] {
@@ -3901,6 +3857,7 @@ type StudioFloorRescueDiagnostics = {
   source: 'none' | 'sparse' | 'emergency' | 'final_fill';
   beforeTracks: number;
   afterTracks: number;
+  rescuePoolVerifiedTrackCount: number;
 };
 
 function canonicalizeStudioArtistKey(artist: string): string {
@@ -4071,11 +4028,9 @@ function applyStudioTailQualityGuard(
 
 async function attemptStudioFloorRescue(args: {
   playlistTracks: Track[];
-  candidateTracks: Track[];
   translatedPrompt: string;
   constraint: PromptConstraint;
   studioGeminiRecallArtists: string[];
-  creditEvidenceTracks: Array<{ artist: string; title: string }>;
 }): Promise<{ tracks: Track[]; diagnostics: StudioFloorRescueDiagnostics }> {
   const beforeTracks = args.playlistTracks.length;
   if (args.constraint.kind !== 'studio' || beforeTracks >= MIN_PLAYLIST_TRACKS) {
@@ -4087,6 +4042,7 @@ async function attemptStudioFloorRescue(args: {
         source: 'none',
         beforeTracks,
         afterTracks: beforeTracks,
+        rescuePoolVerifiedTrackCount: 0,
       },
     };
   }
@@ -4104,6 +4060,7 @@ async function attemptStudioFloorRescue(args: {
         source: 'none',
         beforeTracks,
         afterTracks: beforeTracks,
+        rescuePoolVerifiedTrackCount: 0,
       },
     };
   }
@@ -4120,16 +4077,16 @@ async function attemptStudioFloorRescue(args: {
       reason: `Verified recording studio evidence for ${(args.constraint.value || '').trim()}`,
     }));
 
-  let merged = dedupeTracks([...args.playlistTracks, ...args.candidateTracks, ...rescueSeedTracks]);
-  let rescueTracks = filterTracksByConstraint(merged, args.constraint, args.translatedPrompt, args.creditEvidenceTracks);
+  const rescuePoolVerifiedTrackCount = rescueSeedTracks.length;
+  let merged = dedupeTracks([...args.playlistTracks, ...rescueSeedTracks]);
+  merged = filterTracksByStudioAcceptedEvidenceOnly(merged, args.constraint);
+  let rescueTracks = merged;
   if (rescueTracks.length < MIN_PLAYLIST_TRACKS) {
-    const acceptedOnly = filterTracksByStudioAcceptedEvidenceOnly(merged, args.constraint);
-    if (acceptedOnly.length >= MIN_PLAYLIST_TRACKS) {
-      rescueTracks = acceptedOnly;
-    }
+    rescueTracks = filterTracksByStudioAcceptedEvidenceOnly(merged, args.constraint);
   }
 
   rescueTracks = applyStudioIdentityYearBounds(args.constraint, rescueTracks);
+  rescueTracks = rescueTracks.filter((track) => !isDisallowedStrictStudioVersionTitle(track.song));
   rescueTracks = enforceStudioClassicalRatio(args.translatedPrompt, rescueTracks);
   rescueTracks = await rankStudioTracksByRecognition(args.translatedPrompt, rescueTracks, rescueRankingStudioArtists);
   rescueTracks = await applyStudioMainstreamRecognitionGate(args.translatedPrompt, rescueTracks);
@@ -4145,6 +4102,7 @@ async function attemptStudioFloorRescue(args: {
         source: 'sparse',
         beforeTracks,
         afterTracks: composed.tracks.length,
+        rescuePoolVerifiedTrackCount,
       },
     };
   }
@@ -4183,6 +4141,7 @@ async function attemptStudioFloorRescue(args: {
       source: finalTracks.length > beforeTracks ? 'final_fill' : 'none',
       beforeTracks,
       afterTracks: finalTracks.length,
+      rescuePoolVerifiedTrackCount,
     },
   };
 }
@@ -5936,6 +5895,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     source: 'none',
     beforeTracks: 0,
     afterTracks: 0,
+    rescuePoolVerifiedTrackCount: 0,
   };
 
   if (constraint?.kind === 'studio') {
@@ -6005,6 +5965,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       candidate_input_tracks: candidateTracks.length,
       accepted_evidence_matches: studioDiagnostics.acceptedEvidenceMatches,
       excluded_successor_matches: studioDiagnostics.excludedSuccessorMatches,
+      dropped_due_to_successor_match: studioDiagnostics.droppedDueToSuccessorMatch,
+      dropped_due_to_strict_version_filter: studioDiagnostics.droppedDueToStrictVersionFilter,
+      dropped_due_to_untrusted_studio_evidence: studioDiagnostics.droppedDueToUntrustedStudioEvidence,
       verified_tracks_before_decade_filter: beforeCount,
       verified_tracks_after_decade_filter: afterCount,
       decade_filtered_out_count: Math.max(0, beforeCount - afterCount),
@@ -6041,6 +6004,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
       floor_rescue_source: studioFloorRescueDiagnostics.source,
       floor_rescue_before_tracks: studioFloorRescueDiagnostics.beforeTracks,
       floor_rescue_after_tracks: studioFloorRescueDiagnostics.afterTracks,
+      rescue_pool_verified_track_count: studioFloorRescueDiagnostics.rescuePoolVerifiedTrackCount,
     };
   }
 
@@ -6058,11 +6022,9 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
   if (constraint?.kind === 'studio' && playlist.tracks.length < MIN_PLAYLIST_TRACKS) {
     const floorRescue = await attemptStudioFloorRescue({
       playlistTracks: playlist.tracks,
-      candidateTracks,
       translatedPrompt,
       constraint,
       studioGeminiRecallArtists,
-      creditEvidenceTracks,
     });
     playlist.tracks = floorRescue.tracks;
     studioFloorRescueDiagnostics = floorRescue.diagnostics;
@@ -6074,6 +6036,7 @@ export async function generatePlaylist(userPrompt: string): Promise<PlaylistResp
     truth.studio_constraint.floor_rescue_source = studioFloorRescueDiagnostics.source;
     truth.studio_constraint.floor_rescue_before_tracks = studioFloorRescueDiagnostics.beforeTracks;
     truth.studio_constraint.floor_rescue_after_tracks = studioFloorRescueDiagnostics.afterTracks;
+    truth.studio_constraint.rescue_pool_verified_track_count = studioFloorRescueDiagnostics.rescuePoolVerifiedTrackCount;
   }
 
   if (playlist.tracks.length === 0) {
